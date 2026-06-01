@@ -1,7 +1,12 @@
 package com.example.offerbrowserprototype.infrastructure.web;
 
+import com.example.offerbrowserprototype.domain.exception.AiResponseException;
 import com.example.offerbrowserprototype.domain.exception.AuthorizationException;
+import com.example.offerbrowserprototype.domain.exception.ConflictException;
+import com.example.offerbrowserprototype.domain.exception.DailyLimitExceededException;
+import com.example.offerbrowserprototype.domain.exception.ForbiddenException;
 import com.example.offerbrowserprototype.domain.exception.InvalidRegisterException;
+import com.example.offerbrowserprototype.domain.exception.NotFoundException;
 import com.example.offerbrowserprototype.domain.exception.UserNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,10 +27,40 @@ public class GlobalExceptionHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<String> handleNotFoundException(NotFoundException ex) {
+        logger.error("Resource not found: {}", ex.getMessage());
+        return new ResponseEntity<>(ex.getMessage(), HttpStatus.NOT_FOUND);
+    }
+
     @ExceptionHandler(UserNotFoundException.class)
     public ResponseEntity<String> handleUserNotFoundException(UserNotFoundException ex) {
         logger.error("User not found: {}", ex.getMessage());
         return new ResponseEntity<>(ex.getMessage(), HttpStatus.NOT_FOUND);
+    }
+
+    @ExceptionHandler(ConflictException.class)
+    public ResponseEntity<String> handleConflictException(ConflictException ex) {
+        logger.error("Conflict: {}", ex.getMessage());
+        return new ResponseEntity<>(ex.getMessage(), HttpStatus.CONFLICT);
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<String> handleForbiddenException(ForbiddenException ex) {
+        logger.error("Forbidden: {}", ex.getMessage());
+        return new ResponseEntity<>(ex.getMessage(), HttpStatus.FORBIDDEN);
+    }
+
+    @ExceptionHandler(DailyLimitExceededException.class)
+    public ResponseEntity<String> handleDailyLimitExceededException(DailyLimitExceededException ex) {
+        logger.error("Daily limit exceeded: {}", ex.getMessage());
+        return new ResponseEntity<>(ex.getMessage(), HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    @ExceptionHandler(AiResponseException.class)
+    public ResponseEntity<String> handleAiResponseException(AiResponseException ex) {
+        logger.error("AI response error: {}", ex.getMessage());
+        return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_GATEWAY);
     }
 
     @ExceptionHandler(InvalidRegisterException.class)
