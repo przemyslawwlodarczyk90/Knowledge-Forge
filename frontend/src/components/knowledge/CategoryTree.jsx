@@ -1,22 +1,14 @@
 import { useState } from 'react'
 
-/* ── Ikony SVG ── */
+/* ── Ikony ── */
 const ChevronRight = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-    <path d="M4 2.5L7.5 6 4 9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+    <path d="M3.5 2L7 5.5 3.5 9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 const ChevronDown = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-    <path d="M2 4L6 8l4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
-  </svg>
-)
-const FolderIcon = ({ open }) => (
-  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-    {open
-      ? <path d="M1 4.5a1 1 0 011-1h3l1 1h6a1 1 0 011 1v5a1 1 0 01-1 1H2a1 1 0 01-1-1v-6z" fill="var(--accent)" opacity="0.7" stroke="none"/>
-      : <path d="M1 4.5a1 1 0 011-1h3l1 1h6a1 1 0 011 1v5a1 1 0 01-1 1H2a1 1 0 01-1-1v-6z" stroke="currentColor" strokeWidth="1.3" fill="none"/>
-    }
+  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+    <path d="M2 3.5L5.5 7 9 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
 const NoteIcon = () => (
@@ -26,74 +18,87 @@ const NoteIcon = () => (
   </svg>
 )
 const PlusIcon = () => (
-  <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
-    <path d="M5.5 1.5v8M1.5 5.5h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+    <path d="M5 1.5v7M1.5 5h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
   </svg>
 )
 
 const DIFF_COLOR = { BASIC: '#16a34a', MEDIUM: '#d97706', HARD: '#dc2626' }
-const DIFF_DOT   = { BASIC: '●', MEDIUM: '●', HARD: '●' }
 
-/* ── Pojedynczy węzeł drzewa ── */
-function TreeNode({ node, depth = 0, expanded, topics, loadingTopics, selectedTopicId,
-  onToggle, onSelectTopic, onAddSubcategory, onAddTopic }) {
-
+/* ── Węzeł drzewa ── */
+function TreeNode({
+  node, depth = 0,
+  expanded, topics, loadingTopics, selectedTopicId,
+  onToggle, onSelectTopic, onAddSubcategory, onAddTopic,
+}) {
   const [hovered, setHovered] = useState(false)
-  const isExpanded = expanded.has(node.id)
-  const hasChildren = (node.children?.length ?? 0) > 0
+  const isExpanded  = expanded.has(node.id)
   const nodeTopics  = topics[node.id] ?? []
   const isLoading   = loadingTopics.has(node.id)
-  const indent      = depth * 16
+
+  const isCategory    = depth === 0   // IT, HISTORIA
+  const isSubcategory = depth === 1   // JAVA, SIECI, RENESANS
 
   return (
-    <div>
-      {/* ── Wiersz kategorii ── */}
+    <div className={`tn-block tn-block--d${depth}`}>
+
+      {/* ── Wiersz węzła ── */}
       <div
-        className={`tree-row${isExpanded ? ' tree-row--open' : ''}`}
-        style={{ paddingLeft: 12 + indent }}
+        className={`tn-row tn-row--d${depth}${isExpanded ? ' tn-row--open' : ''}`}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        {/* Chevron */}
-        <button
-          className="tree-chevron"
-          onClick={() => onToggle(node.id)}
-          aria-label={isExpanded ? 'Zwiń' : 'Rozwiń'}
-        >
+        <button className="tn-chevron" onClick={() => onToggle(node.id)}>
           {isExpanded ? <ChevronDown /> : <ChevronRight />}
         </button>
 
-        {/* Folder + nazwa */}
-        <span className="tree-folder-icon"><FolderIcon open={isExpanded} /></span>
         <span
-          className="tree-node-name"
+          className="tn-name"
           onClick={() => onToggle(node.id)}
           title={node.name}
         >
           {node.name}
         </span>
 
-        {/* Akcje (widoczne na hover) */}
         {hovered && (
-          <div className="tree-actions">
-            <button className="tree-action-btn" title="Dodaj podkategorię"
-              onClick={e => { e.stopPropagation(); onAddSubcategory(node.id, node.name) }}>
-              <span className="tree-action-icon"><PlusIcon /></span>
-              <span className="tree-action-text">Kat.</span>
-            </button>
-            <button className="tree-action-btn tree-action-btn--topic" title="Dodaj temat"
-              onClick={e => { e.stopPropagation(); onAddTopic(node.id, node.name) }}>
-              <span className="tree-action-icon"><PlusIcon /></span>
-              <span className="tree-action-text">Temat</span>
-            </button>
+          <div className="tn-actions">
+            {isCategory && (
+              <button
+                className="tn-act tn-act--sub"
+                title="Dodaj podkategorię"
+                onClick={e => { e.stopPropagation(); onAddSubcategory(node.id, node.name) }}
+              >
+                <PlusIcon /> <span>Podkat.</span>
+              </button>
+            )}
+            {isSubcategory && (
+              <button
+                className="tn-act tn-act--topic"
+                title="Dodaj temat / notatkę"
+                onClick={e => { e.stopPropagation(); onAddTopic(node.id, node.name) }}
+              >
+                <PlusIcon /> <span>Temat</span>
+              </button>
+            )}
+            {!isCategory && !isSubcategory && (
+              /* głębiej niż 1 — daj oba */
+              <>
+                <button className="tn-act tn-act--sub" onClick={e => { e.stopPropagation(); onAddSubcategory(node.id, node.name) }}>
+                  <PlusIcon /> <span>Podkat.</span>
+                </button>
+                <button className="tn-act tn-act--topic" onClick={e => { e.stopPropagation(); onAddTopic(node.id, node.name) }}>
+                  <PlusIcon /> <span>Temat</span>
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
 
-      {/* ── Zawartość (jeśli rozwinięty) ── */}
+      {/* ── Zawartość rozwinięta ── */}
       {isExpanded && (
-        <div>
-          {/* Podkategorie */}
+        <div className="tn-children">
+          {/* Podkategorie / dzieci */}
           {(node.children ?? []).map(child => (
             <TreeNode
               key={child.id}
@@ -110,30 +115,30 @@ function TreeNode({ node, depth = 0, expanded, topics, loadingTopics, selectedTo
             />
           ))}
 
-          {/* Tematy */}
+          {/* Tematy (liście) */}
           {isLoading && (
-            <div className="tree-loading" style={{ paddingLeft: 28 + indent + 16 }}>
-              <span className="tree-spinner" /> Ładowanie...
+            <div className="tn-loading">
+              <span className="tn-spinner" /> Ładowanie...
             </div>
           )}
-          {nodeTopics.map(topic => (
+          {!isLoading && nodeTopics.map(topic => (
             <button
               key={topic.id}
-              className={`tree-topic${selectedTopicId === topic.id ? ' tree-topic--active' : ''}`}
-              style={{ paddingLeft: 28 + indent + 16 }}
+              className={`tn-topic${selectedTopicId === topic.id ? ' tn-topic--active' : ''}`}
               onClick={() => onSelectTopic(topic)}
             >
-              <span className="tree-topic-icon"><NoteIcon /></span>
-              <span className="tree-topic-name" title={topic.title}>{topic.title}</span>
-              <span className="tree-topic-dot" title={topic.difficulty}
-                style={{ color: DIFF_COLOR[topic.difficulty] }}>
-                {DIFF_DOT[topic.difficulty]}
-              </span>
+              <span className="tn-topic-icon"><NoteIcon /></span>
+              <span className="tn-topic-name" title={topic.title}>{topic.title}</span>
+              <span
+                className="tn-topic-diff"
+                title={topic.difficulty}
+                style={{ background: DIFF_COLOR[topic.difficulty] }}
+              />
             </button>
           ))}
-          {!isLoading && nodeTopics.length === 0 && !hasChildren && (
-            <p className="tree-empty" style={{ paddingLeft: 28 + indent + 16 }}>
-              Brak tematów
+          {!isLoading && nodeTopics.length === 0 && (node.children ?? []).length === 0 && (
+            <p className="tn-empty-hint">
+              {isCategory ? 'Brak podkategorii' : 'Brak tematów'}
             </p>
           )}
         </div>
@@ -150,28 +155,37 @@ export default function CategoryTree({
 }) {
   return (
     <aside className="tree-panel">
+
       {/* Nagłówek */}
-      <div className="tree-header">
-        <span className="tree-header-title">Baza wiedzy</span>
-        <button className="tree-add-root" onClick={onAddRootCategory} title="Nowa kategoria">
+      <div className="tree-head">
+        <span className="tree-head-title">Baza wiedzy</span>
+        <button className="tree-add-btn" onClick={onAddRootCategory} title="Nowa kategoria (np. IT, HISTORIA)">
           <PlusIcon />
         </button>
       </div>
 
+      {/* Legenda głębokości */}
+      <div className="tree-legend">
+        <span className="tree-legend-item tree-legend-item--cat">Kategoria</span>
+        <span className="tree-legend-sep">›</span>
+        <span className="tree-legend-item tree-legend-item--sub">Podkategoria</span>
+        <span className="tree-legend-sep">›</span>
+        <span className="tree-legend-item tree-legend-item--topic">Temat</span>
+      </div>
+
       {/* Drzewo */}
-      <div className="tree-content">
+      <div className="tree-body">
         {loading ? (
-          <div className="tree-loading-full">
-            <span className="tree-spinner" /> Ładowanie...
-          </div>
+          <div className="tree-status"><span className="tn-spinner" /> Ładowanie...</div>
         ) : tree.length === 0 ? (
-          <div className="tree-empty-full">
-            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" style={{ color: 'var(--text-3)', margin: '0 auto 8px' }}>
-              <path d="M4 10a2 2 0 012-2h7l2 2h11a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V10z" stroke="currentColor" strokeWidth="1.5" fill="none"/>
+          <div className="tree-empty">
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none" style={{ color: 'var(--border-1)' }}>
+              <path d="M4 10a2 2 0 012-2h8l2 2h14a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V10z" stroke="currentColor" strokeWidth="1.5"/>
             </svg>
-            <p>Brak kategorii</p>
-            <button className="tree-create-first" onClick={onAddRootCategory}>
-              Utwórz pierwszą →
+            <p className="tree-empty-title">Brak kategorii</p>
+            <p className="tree-empty-sub">Zacznij od dodania kategorii<br/>np. <em>IT</em> lub <em>HISTORIA</em></p>
+            <button className="tree-empty-btn" onClick={onAddRootCategory}>
+              Dodaj kategorię →
             </button>
           </div>
         ) : (
@@ -195,124 +209,196 @@ export default function CategoryTree({
 
       <style>{`
         .tree-panel {
-          width: 272px; flex-shrink: 0;
+          width: 268px; flex-shrink: 0;
           border-right: 1px solid var(--border-1);
-          background: #fff;
+          background: var(--bg-2);
           display: flex; flex-direction: column;
           height: 100%;
         }
-        .tree-header {
+
+        /* Nagłówek */
+        .tree-head {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 14px 14px 10px;
+          padding: 13px 14px 10px;
           border-bottom: 1px solid var(--border-1);
+          background: #fff;
           flex-shrink: 0;
         }
-        .tree-header-title {
-          font-size: 0.72rem; font-weight: 700;
-          letter-spacing: 0.1em; text-transform: uppercase;
-          color: var(--text-3);
+        .tree-head-title {
+          font-size: 0.68rem; font-weight: 800;
+          letter-spacing: 0.12em; text-transform: uppercase;
+          color: var(--text-2);
         }
-        .tree-add-root {
-          width: 26px; height: 26px; border-radius: 6px;
-          background: var(--accent-light); border: 1px solid var(--border-0);
-          color: var(--accent); display: flex; align-items: center; justify-content: center;
+        .tree-add-btn {
+          width: 24px; height: 24px; border-radius: 6px;
+          background: var(--accent); border: none;
+          color: #fff; display: flex; align-items: center; justify-content: center;
           cursor: pointer; transition: background var(--t-fast);
         }
-        .tree-add-root:hover { background: var(--accent-glow-strong); }
+        .tree-add-btn:hover { background: var(--accent-dim); }
 
-        .tree-content {
-          flex: 1; overflow-y: auto; padding: 6px 0;
+        /* Legenda */
+        .tree-legend {
+          display: flex; align-items: center; gap: 4px;
+          padding: 6px 14px 8px;
+          border-bottom: 1px solid var(--border-1);
+          background: #fff;
+          flex-shrink: 0;
+        }
+        .tree-legend-item {
+          font-family: var(--font-mono); font-size: 0.58rem;
+          font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+        }
+        .tree-legend-item--cat   { color: var(--accent); }
+        .tree-legend-item--sub   { color: var(--text-2); }
+        .tree-legend-item--topic { color: var(--text-3); }
+        .tree-legend-sep { color: var(--text-3); font-size: 0.65rem; }
+
+        /* Ciało */
+        .tree-body {
+          flex: 1; overflow-y: auto;
+          padding: 8px 0 16px;
         }
 
-        /* Wiersz kategorii */
-        .tree-row {
-          display: flex; align-items: center; gap: 4px;
-          padding: 5px 8px 5px 12px;
-          cursor: default; min-height: 30px;
+        /* ── Blok węzła ── */
+        .tn-block { }
+
+        /* ── Wiersz ── */
+        .tn-row {
+          display: flex; align-items: center; gap: 5px;
+          cursor: default; min-height: 32px;
           transition: background var(--t-fast);
+          padding-right: 8px;
           position: relative;
         }
-        .tree-row:hover { background: var(--bg-2); }
-        .tree-row--open > .tree-node-name { color: var(--text-0); }
+        .tn-row:hover { background: rgba(0,0,0,0.03); }
 
-        .tree-chevron {
+        /* Depth 0 — Kategoria (IT, HISTORIA) */
+        .tn-row--d0 {
+          padding-left: 10px;
+          border-bottom: 1px solid var(--border-2);
+          margin-top: 4px;
+        }
+        .tn-row--d0:first-child { margin-top: 0; }
+        .tn-row--d0 .tn-name {
+          font-size: 0.78rem; font-weight: 800;
+          text-transform: uppercase; letter-spacing: 0.06em;
+          color: var(--text-0);
+        }
+
+        /* Depth 1 — Podkategoria (JAVA, SIECI) */
+        .tn-row--d1 { padding-left: 22px; }
+        .tn-row--d1 .tn-name {
+          font-size: 0.80rem; font-weight: 600;
+          color: var(--text-1);
+        }
+
+        /* Depth 2+ */
+        .tn-row--d2 { padding-left: 38px; }
+        .tn-row--d2 .tn-name {
+          font-size: 0.79rem; font-weight: 500;
+          color: var(--text-2);
+        }
+
+        .tn-chevron {
           width: 18px; height: 18px; flex-shrink: 0;
           background: none; border: none; cursor: pointer;
-          color: var(--text-3); display: flex; align-items: center; justify-content: center;
+          color: var(--text-3);
+          display: flex; align-items: center; justify-content: center;
           border-radius: 4px; transition: color var(--t-fast), background var(--t-fast);
         }
-        .tree-chevron:hover { color: var(--accent); background: var(--accent-light); }
+        .tn-chevron:hover { color: var(--accent); background: var(--accent-light); }
 
-        .tree-folder-icon { flex-shrink: 0; display: flex; align-items: center; color: var(--text-2); }
-
-        .tree-node-name {
-          flex: 1; font-size: 0.82rem; font-weight: 500;
-          color: var(--text-1); cursor: pointer; overflow: hidden;
-          text-overflow: ellipsis; white-space: nowrap;
-          transition: color var(--t-fast);
+        .tn-name {
+          flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          cursor: pointer; transition: color var(--t-fast);
         }
-        .tree-node-name:hover { color: var(--text-0); }
+        .tn-name:hover { color: var(--accent) !important; }
 
         /* Akcje hover */
-        .tree-actions {
+        .tn-actions {
           display: flex; gap: 3px; flex-shrink: 0;
         }
-        .tree-action-btn {
+        .tn-act {
           display: flex; align-items: center; gap: 2px;
-          padding: 3px 6px; border-radius: 5px; border: 1px solid var(--border-1);
-          background: #fff; color: var(--text-2); font-size: 0.65rem; font-weight: 600;
+          padding: 3px 7px; border-radius: 5px;
+          font-size: 0.64rem; font-weight: 700;
           cursor: pointer; white-space: nowrap;
-          transition: all var(--t-fast);
+          border: 1px solid; transition: all var(--t-fast);
         }
-        .tree-action-btn:hover { background: var(--accent-light); color: var(--accent); border-color: var(--border-0); }
-        .tree-action-btn--topic:hover { background: #f0fdf4; color: #16a34a; border-color: rgba(22,163,74,.25); }
-        .tree-action-icon { display: flex; align-items: center; }
-        .tree-action-text { font-size: 0.62rem; }
+        .tn-act--sub {
+          background: var(--accent-light); color: var(--accent);
+          border-color: var(--border-0);
+        }
+        .tn-act--sub:hover { background: var(--accent-glow-strong); }
+        .tn-act--topic {
+          background: #f0fdf4; color: #16a34a;
+          border-color: rgba(22,163,74,.25);
+        }
+        .tn-act--topic:hover { background: #dcfce7; }
+
+        /* Dzieci */
+        .tn-children { }
 
         /* Temat (liść) */
-        .tree-topic {
-          display: flex; align-items: center; gap: 7px;
-          width: 100%; padding: 5px 10px 5px 12px;
+        .tn-topic {
+          display: flex; align-items: center; gap: 8px;
+          width: 100%; padding: 6px 10px 6px 46px;
           background: none; border: none; text-align: left;
           cursor: pointer; min-height: 28px;
           transition: background var(--t-fast);
+          border-left: 2px solid transparent;
         }
-        .tree-topic:hover { background: var(--bg-2); }
-        .tree-topic--active { background: var(--accent-light) !important; }
-        .tree-topic--active .tree-topic-name { color: var(--accent); font-weight: 600; }
-        .tree-topic-icon { color: var(--text-3); flex-shrink: 0; display: flex; }
-        .tree-topic-name {
-          flex: 1; font-size: 0.8rem; color: var(--text-1); overflow: hidden;
-          text-overflow: ellipsis; white-space: nowrap;
+        .tn-topic:hover { background: rgba(37,99,235,0.04); }
+        .tn-topic--active {
+          background: var(--accent-light) !important;
+          border-left-color: var(--accent);
         }
-        .tree-topic-dot { font-size: 0.55rem; flex-shrink: 0; }
+        .tn-topic--active .tn-topic-name { color: var(--accent); font-weight: 600; }
+        .tn-topic-icon { color: var(--text-3); flex-shrink: 0; display: flex; }
+        .tn-topic-name {
+          flex: 1; font-size: 0.78rem; color: var(--text-1);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          transition: color var(--t-fast);
+        }
+        .tn-topic-diff {
+          width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+        }
 
         /* Stany */
-        .tree-loading {
+        .tn-loading {
           display: flex; align-items: center; gap: 6px;
-          font-size: 0.75rem; color: var(--text-3); padding: 6px 12px;
+          font-size: 0.74rem; color: var(--text-3); padding: 6px 46px;
         }
-        .tree-empty { font-size: 0.73rem; color: var(--text-3); padding: 4px 12px; font-style: italic; }
-        .tree-spinner {
+        .tn-spinner {
           width: 10px; height: 10px; border-radius: 50%;
           border: 1.5px solid var(--border-1); border-top-color: var(--accent);
           animation: spin .6s linear infinite; flex-shrink: 0;
         }
-        .tree-loading-full {
+        .tn-empty-hint {
+          font-size: 0.71rem; color: var(--text-3); padding: 4px 46px;
+          font-style: italic;
+        }
+
+        /* Puste drzewo */
+        .tree-status {
           display: flex; align-items: center; gap: 8px;
-          padding: 24px 16px; font-size: 0.8rem; color: var(--text-2);
+          padding: 20px 14px; font-size: 0.8rem; color: var(--text-2);
         }
-        .tree-empty-full {
-          padding: 32px 16px; text-align: center;
-          font-size: 0.8rem; color: var(--text-3);
+        .tree-empty {
+          padding: 28px 16px; text-align: center;
         }
-        .tree-create-first {
-          display: inline-block; margin-top: 8px;
-          font-size: 0.78rem; color: var(--accent); font-weight: 600;
-          background: none; border: none; cursor: pointer;
-          transition: opacity .15s;
+        .tree-empty svg { margin: 0 auto 12px; }
+        .tree-empty-title { font-size: 0.88rem; font-weight: 700; color: var(--text-2); margin-bottom: 6px; }
+        .tree-empty-sub   { font-size: 0.76rem; color: var(--text-3); line-height: 1.6; margin-bottom: 14px; }
+        .tree-empty-sub em { font-style: normal; color: var(--accent); font-weight: 600; }
+        .tree-empty-btn {
+          font-size: 0.78rem; font-weight: 700; color: var(--accent);
+          background: var(--accent-light); border: 1px solid var(--border-0);
+          padding: 7px 14px; border-radius: var(--radius-md); cursor: pointer;
+          transition: background var(--t-fast);
         }
-        .tree-create-first:hover { opacity: .75; }
+        .tree-empty-btn:hover { background: var(--accent-glow-strong); }
       `}</style>
     </aside>
   )

@@ -29,9 +29,12 @@ export default function CreateCategoryModal({ parentId, parentName, onClose, onC
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <header className="modal-head">
-          <h2 className="modal-title">
-            {parentId ? `Podkategoria w "${parentName}"` : 'Nowa kategoria'}
-          </h2>
+          <div>
+            <p className="modal-eyebrow">{parentId ? 'Podkategoria' : 'Kategoria główna'}</p>
+            <h2 className="modal-title">
+              {parentId ? `w "${parentName}"` : 'Nowa kategoria'}
+            </h2>
+          </div>
           <button className="modal-close" onClick={onClose}>✕</button>
         </header>
 
@@ -42,7 +45,7 @@ export default function CreateCategoryModal({ parentId, parentName, onClose, onC
               className="mf-input"
               value={name}
               onChange={e => { setName(e.target.value); setError('') }}
-              placeholder="np. Programowanie obiektowe"
+              placeholder={parentId ? 'np. JAVA, SIECI, RENESANS' : 'np. IT, HISTORIA, MEDYCYNA'}
               autoFocus
             />
             {error && <span className="mf-error">{error}</span>}
@@ -75,6 +78,7 @@ export default function CreateCategoryModal({ parentId, parentName, onClose, onC
 function ModalStyles() {
   return (
     <style>{`
+      .modal-eyebrow { font-family:var(--font-mono); font-size:0.6rem; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--accent); margin-bottom:2px; }
       .modal-backdrop {
         position:fixed; inset:0; z-index:200;
         background:rgba(15,23,42,0.45); backdrop-filter:blur(3px);
