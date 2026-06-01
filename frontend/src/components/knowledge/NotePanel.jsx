@@ -114,6 +114,24 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
 
       {/* ── Konfiguracja ── */}
       <div className="note-config">
+
+        {/* Baner KOD — widoczny przy dopisywaniu gdy temat jest kodem */}
+        {isCode && (
+          <div className="note-code-banner">
+            <span className="note-code-banner-icon">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M9.5 2.5l3 4-3 4M4.5 2.5l-3 4 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </span>
+            <div>
+              <span className="note-code-banner-title">Notatka oznaczona jako KOD</span>
+              <span className="note-code-banner-sub">
+                AI wygeneruje treść z przykładami kodu · dostępny przycisk "Wygeneruj zadania"
+              </span>
+            </div>
+          </div>
+        )}
+
         <div className="note-config-row">
           <span className="note-config-label">Trudność</span>
           <div className="diff-group">
@@ -315,7 +333,26 @@ function NoteStyles() {
       .note-config {
         padding:12px 24px; border-bottom:1px solid var(--border-1);
         flex-shrink:0; background:var(--bg-2);
+        display:flex; flex-direction:column; gap:10px;
       }
+
+      /* Baner KOD */
+      .note-code-banner {
+        display:flex; align-items:flex-start; gap:10px;
+        padding:10px 12px; border-radius:var(--radius-md);
+        background:#eff6ff; border:1px solid rgba(37,99,235,.25);
+      }
+      .note-code-banner-icon {
+        color:var(--accent); flex-shrink:0; display:flex; margin-top:1px;
+      }
+      .note-code-banner-title {
+        display:block; font-size:0.78rem; font-weight:700; color:var(--accent);
+        margin-bottom:2px;
+      }
+      .note-code-banner-sub {
+        display:block; font-size:0.71rem; color:var(--text-2); line-height:1.5;
+      }
+
       .note-config-row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
       .note-config-label { font-size:0.71rem; font-weight:700; color:var(--text-2); letter-spacing:0.04em; white-space:nowrap; }
       .diff-group { display:flex; gap:5px; flex-wrap:wrap; }

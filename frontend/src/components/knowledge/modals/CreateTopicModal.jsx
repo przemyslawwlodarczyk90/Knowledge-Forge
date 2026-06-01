@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { topicsApi } from '@/api/services'
 import { toast } from '@/store'
+import ConfirmCodeModal from './ConfirmCodeModal'
 
 const DIFFICULTY_OPTS = [
   { value: 'BASIC',  label: 'Podstawowy', color: '#16a34a', bg: '#f0fdf4', border: 'rgba(22,163,74,.25)' },
@@ -12,9 +13,10 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
   const [title, setTitle]             = useState('')
   const [shortPrompt, setShortPrompt] = useState('')
   const [difficulty, setDifficulty]   = useState('BASIC')
-  const [isCode, setIsCode]           = useState(false)
-  const [loading, setLoading]         = useState(false)
-  const [errors, setErrors]           = useState({})
+  const [isCode, setIsCode]             = useState(false)
+  const [showCodeConfirm, setShowCodeConfirm] = useState(false)
+  const [loading, setLoading]           = useState(false)
+  const [errors, setErrors]             = useState({})
 
   const validate = () => {
     const e = {}
@@ -107,11 +109,11 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
           {/* Czy to KOD — nieodwracalny boolean */}
           <div className="mf-field">
             <label className="mf-label">Typ notatki</label>
-            <label className="code-toggle">
+            <label className="code-toggle" onClick={e => { if (!isCode) { e.preventDefault(); setShowCodeConfirm(true) } }}>
               <input
                 type="checkbox"
                 checked={isCode}
-                onChange={e => setIsCode(e.target.checked)}
+                onChange={e => { if (!e.target.checked) setIsCode(false) }}
                 className="code-toggle-input"
               />
               <span className={`code-toggle-track${isCode ? ' code-toggle-track--on' : ''}`}>
@@ -145,6 +147,13 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
           </footer>
         </form>
       </div>
+
+      {showCodeConfirm && (
+        <ConfirmCodeModal
+          onConfirm={() => setIsCode(true)}
+          onClose={() => setShowCodeConfirm(false)}
+        />
+      )}
 
       <style>{`
         .tm-backdrop {
