@@ -16,6 +16,7 @@ public class TopicDto {
     private String shortPrompt;
     private Difficulty difficulty;
     private TopicStatus status;
+    private boolean code;
     private Instant createdAt;
     private Instant updatedAt;
 
@@ -23,7 +24,8 @@ public class TopicDto {
     }
 
     public TopicDto(UUID id, Long userId, UUID categoryId, String title, String shortPrompt,
-                    Difficulty difficulty, TopicStatus status, Instant createdAt, Instant updatedAt) {
+                    Difficulty difficulty, TopicStatus status, boolean code,
+                    Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.userId = userId;
         this.categoryId = categoryId;
@@ -31,6 +33,7 @@ public class TopicDto {
         this.shortPrompt = shortPrompt;
         this.difficulty = difficulty;
         this.status = status;
+        this.code = code;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
@@ -44,6 +47,7 @@ public class TopicDto {
                 t.getShortPrompt(),
                 t.getDifficulty(),
                 t.getStatus(),
+                t.isCode(),
                 t.getCreatedAt(),
                 t.getUpdatedAt()
         );
@@ -103,6 +107,14 @@ public class TopicDto {
 
     public void setStatus(TopicStatus status) {
         this.status = status;
+    }
+
+    public boolean isCode() {
+        return code;
+    }
+
+    public void setCode(boolean code) {
+        this.code = code;
     }
 
     public Instant getCreatedAt() {

@@ -273,6 +273,18 @@ export default function AppLayout() {
         }
 
         .main-content { flex:1; padding:28px 32px; }
+
+        /* ── Responsywność ── */
+        @media (max-width: 900px) {
+          .shell { --sb: 60px; }
+          .topbar { padding:0 16px; }
+          .topbar-chip { display:none; }
+          .main-content { padding:16px; }
+        }
+        @media (max-width: 540px) {
+          .main-content { padding:12px; }
+          .topbar-title { font-size:0.85rem; }
+        }
       `}</style>
     </>
   )

@@ -96,7 +96,7 @@ let toastId = 0
 
 export const useUIStore = create((set, get) => ({
   toasts:      [],
-  sidebarOpen: true,
+  sidebarOpen: typeof window !== 'undefined' ? window.innerWidth > 900 : true,
 
   addToast: (message, type = 'info', duration = 4000) => {
     const id = ++toastId

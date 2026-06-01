@@ -39,6 +39,10 @@ public class Topic {
     @Builder.Default
     private TopicStatus status = TopicStatus.NEW;
 
+    @Column(name = "is_code", nullable = false)
+    @Builder.Default
+    private boolean code = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

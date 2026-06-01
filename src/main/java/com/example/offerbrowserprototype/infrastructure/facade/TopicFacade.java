@@ -41,6 +41,7 @@ public class TopicFacade {
                 .shortPrompt(req.shortPrompt())
                 .difficulty(req.difficulty())
                 .status(TopicStatus.NEW)
+                .code(req.code())
                 .build();
 
         return TopicDto.from(topicRepo.save(topic));

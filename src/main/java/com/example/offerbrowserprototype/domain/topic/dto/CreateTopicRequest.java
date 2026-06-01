@@ -10,6 +10,7 @@ public record CreateTopicRequest(
         UUID categoryId,
         @NotBlank String title,
         @NotBlank String shortPrompt,
-        @NotNull Difficulty difficulty
+        @NotNull Difficulty difficulty,
+        boolean code
 ) {
 }
