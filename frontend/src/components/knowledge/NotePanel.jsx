@@ -219,6 +219,12 @@ function EmptyNote() {
   )
 }
 
+const EXAMPLE_LEVEL_LABEL = {
+  FOR_CHILD:   { text: 'Dla ośmiolatka', color: '#16a34a', bg: '#f0fdf4' },
+  CONTRASTIVE: { text: 'Kontrastowy',    color: '#d97706', bg: '#fffbeb' },
+  ADVANCED:    { text: 'Zaawansowany',   color: '#7c3aed', bg: '#f5f3ff' },
+}
+
 function NoteContentView({ note }) {
   const c = note.content
   if (!c) return null
@@ -240,13 +246,24 @@ function NoteContentView({ note }) {
       ))}
       {(c.examples ?? []).length > 0 && <>
         <h3 className="na-sub-h">Przykłady</h3>
-        {c.examples.map((ex, i) => (
-          <div key={i} className="na-example">
-            {ex.title       && <p className="na-example-title">{ex.title}</p>}
-            {ex.code        && <pre className="na-code"><code>{ex.code}</code></pre>}
-            {ex.explanation && <p className="na-example-exp">{ex.explanation}</p>}
-          </div>
-        ))}
+        {c.examples.map((ex, i) => {
+          const lvl = EXAMPLE_LEVEL_LABEL[ex.level]
+          return (
+            <div key={i} className="na-example">
+              <div className="na-example-head">
+                {ex.title && <span className="na-example-title">{ex.title}</span>}
+                {lvl && (
+                  <span className="na-example-badge"
+                    style={{ color: lvl.color, background: lvl.bg, border: `1px solid ${lvl.color}30` }}>
+                    {lvl.text}
+                  </span>
+                )}
+              </div>
+              {ex.content    && <pre className="na-code"><code>{ex.content}</code></pre>}
+              {ex.explanation && <p className="na-example-exp">{ex.explanation}</p>}
+            </div>
+          )
+        })}
       </>}
       {(c.memoryPoints ?? []).length > 0 && <>
         <h3 className="na-sub-h">Do zapamiętania</h3>
@@ -258,6 +275,12 @@ function NoteContentView({ note }) {
         <h3 className="na-sub-h">Częste błędy</h3>
         <ul className="na-list na-list--red">
           {c.commonMistakes.map((m, i) => <li key={i}>{m}</li>)}
+        </ul>
+      </>}
+      {(c.suggestedSearchPhrases ?? []).length > 0 && <>
+        <h3 className="na-sub-h">Wyszukaj więcej</h3>
+        <ul className="na-list na-list--search">
+          {c.suggestedSearchPhrases.map((p, i) => <li key={i}><code className="na-search-phrase">{p}</code></li>)}
         </ul>
       </>}
     </article>
@@ -397,9 +420,17 @@ function NoteStyles() {
       .na-section-p { font-size:0.84rem; color:var(--text-1); line-height:1.7; }
       .na-sub-h { font-size:0.88rem; font-weight:700; color:var(--text-0); margin:18px 0 10px; }
       .na-example { background:var(--bg-2); border-radius:var(--radius-md); padding:12px 14px; margin-bottom:10px; }
-      .na-example-title { font-size:0.79rem; font-weight:700; color:var(--text-1); margin-bottom:7px; }
-      .na-code { background:var(--bg-3); border-radius:var(--radius-sm); padding:10px 12px; overflow-x:auto; font-family:var(--font-mono); font-size:0.79rem; color:var(--text-0); margin:7px 0; }
+      .na-example-head { display:flex; align-items:center; gap:8px; margin-bottom:7px; flex-wrap:wrap; }
+      .na-example-title { font-size:0.8rem; font-weight:700; color:var(--text-1); }
+      .na-example-badge {
+        font-family:var(--font-mono); font-size:0.6rem; font-weight:700;
+        letter-spacing:0.07em; text-transform:uppercase;
+        padding:2px 7px; border-radius:100px;
+      }
+      .na-code { background:var(--bg-3); border-radius:var(--radius-sm); padding:10px 12px; overflow-x:auto; font-family:var(--font-mono); font-size:0.79rem; color:var(--text-0); margin:7px 0; white-space:pre-wrap; word-break:break-word; }
       .na-example-exp { font-size:0.79rem; color:var(--text-2); margin-top:5px; line-height:1.6; }
+      .na-list--search { list-style:none; padding-left:0; }
+      .na-search-phrase { font-family:var(--font-mono); font-size:0.78rem; background:var(--bg-2); padding:2px 7px; border-radius:4px; color:var(--accent); }
       .na-list { padding-left:18px; display:flex; flex-direction:column; gap:5px; }
       .na-list li { font-size:0.84rem; color:var(--text-1); line-height:1.6; }
       .na-list--green li::marker { color:#16a34a; }

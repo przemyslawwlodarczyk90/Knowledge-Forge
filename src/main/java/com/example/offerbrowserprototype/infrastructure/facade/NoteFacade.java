@@ -25,7 +25,7 @@ import java.util.UUID;
 @Transactional
 public class NoteFacade {
 
-    private static final String DEFAULT_PROMPT_VERSION = "v1";
+    private static final String DEFAULT_PROMPT_VERSION = com.example.offerbrowserprototype.domain.ai.NotePromptBuilder.PROMPT_VERSION;
 
     private final NoteRepository noteRepo;
     private final TopicRepository topicRepo;
@@ -86,8 +86,7 @@ public class NoteFacade {
         NoteContent generatedContent = noteGenPort.generate(
                 topic.getTitle(),
                 topic.getShortPrompt(),
-                topic.getDifficulty(),
-                DEFAULT_PROMPT_VERSION
+                topic.getDifficulty()
         );
 
         Note note = Note.builder()
@@ -116,8 +115,7 @@ public class NoteFacade {
         NoteContent generatedContent = noteGenPort.generate(
                 topic.getTitle(),
                 topic.getShortPrompt(),
-                topic.getDifficulty(),
-                DEFAULT_PROMPT_VERSION
+                topic.getDifficulty()
         );
 
         Note note = noteRepo.findByTopicId(topicId)

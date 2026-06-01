@@ -1,4 +1,4 @@
-import{j as e}from"./index-BSCmlRk3.js";import{u as i}from"./index-D2UxC5-q.js";function l({title:t,subtitle:a,actions:r}){return e.jsxs(e.Fragment,{children:[e.jsxs("header",{className:"page-header animate-fade-in",children:[e.jsxs("div",{children:[e.jsx("h1",{className:"page-title",children:t}),a&&e.jsx("p",{className:"page-subtitle",children:a})]}),r&&e.jsx("div",{className:"page-header-actions",children:r})]}),e.jsx("style",{children:`
+import{j as e}from"./index-DhcuM7Nn.js";import{u as i}from"./index-h3gy0YxQ.js";function l({title:t,subtitle:a,actions:r}){return e.jsxs(e.Fragment,{children:[e.jsxs("header",{className:"page-header animate-fade-in",children:[e.jsxs("div",{children:[e.jsx("h1",{className:"page-title",children:t}),a&&e.jsx("p",{className:"page-subtitle",children:a})]}),r&&e.jsx("div",{className:"page-header-actions",children:r})]}),e.jsx("style",{children:`
         .page-header {
           display: flex; align-items: flex-start;
           justify-content: space-between; gap: 16px;

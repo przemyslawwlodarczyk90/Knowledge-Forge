@@ -13,127 +13,75 @@ public class NoteContent {
     private List<String> memoryPoints;
     private List<String> suggestedSearchPhrases;
 
-    public NoteContent() {
-    }
+    public NoteContent() {}
 
-    public String getTitle() {
-        return title;
-    }
+    // ── Gettery / Settery ─────────────────────────────────────────
 
-    public void setTitle(String title) {
-        this.title = title;
-    }
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
 
-    public String getSummary() {
-        return summary;
-    }
+    public String getSummary() { return summary; }
+    public void setSummary(String summary) { this.summary = summary; }
 
-    public void setSummary(String summary) {
-        this.summary = summary;
-    }
+    public String getSimpleExplanation() { return simpleExplanation; }
+    public void setSimpleExplanation(String simpleExplanation) { this.simpleExplanation = simpleExplanation; }
 
-    public String getSimpleExplanation() {
-        return simpleExplanation;
-    }
+    public List<Section> getSections() { return sections; }
+    public void setSections(List<Section> sections) { this.sections = sections; }
 
-    public void setSimpleExplanation(String simpleExplanation) {
-        this.simpleExplanation = simpleExplanation;
-    }
+    public List<Example> getExamples() { return examples; }
+    public void setExamples(List<Example> examples) { this.examples = examples; }
 
-    public List<Section> getSections() {
-        return sections;
-    }
+    public List<String> getCommonMistakes() { return commonMistakes; }
+    public void setCommonMistakes(List<String> commonMistakes) { this.commonMistakes = commonMistakes; }
 
-    public void setSections(List<Section> sections) {
-        this.sections = sections;
-    }
+    public List<String> getMemoryPoints() { return memoryPoints; }
+    public void setMemoryPoints(List<String> memoryPoints) { this.memoryPoints = memoryPoints; }
 
-    public List<Example> getExamples() {
-        return examples;
-    }
+    public List<String> getSuggestedSearchPhrases() { return suggestedSearchPhrases; }
+    public void setSuggestedSearchPhrases(List<String> suggestedSearchPhrases) { this.suggestedSearchPhrases = suggestedSearchPhrases; }
 
-    public void setExamples(List<Example> examples) {
-        this.examples = examples;
-    }
-
-    public List<String> getCommonMistakes() {
-        return commonMistakes;
-    }
-
-    public void setCommonMistakes(List<String> commonMistakes) {
-        this.commonMistakes = commonMistakes;
-    }
-
-    public List<String> getMemoryPoints() {
-        return memoryPoints;
-    }
-
-    public void setMemoryPoints(List<String> memoryPoints) {
-        this.memoryPoints = memoryPoints;
-    }
-
-    public List<String> getSuggestedSearchPhrases() {
-        return suggestedSearchPhrases;
-    }
-
-    public void setSuggestedSearchPhrases(List<String> suggestedSearchPhrases) {
-        this.suggestedSearchPhrases = suggestedSearchPhrases;
-    }
+    // ── Sekcja ────────────────────────────────────────────────────
 
     public static class Section {
         private String heading;
         private String content;
 
-        public Section() {
-        }
+        public Section() {}
 
-        public String getHeading() {
-            return heading;
-        }
+        public String getHeading() { return heading; }
+        public void setHeading(String heading) { this.heading = heading; }
+        public String getContent() { return content; }
+        public void setContent(String content) { this.content = content; }
+    }
 
-        public void setHeading(String heading) {
-            this.heading = heading;
-        }
+    // ── Przykład ──────────────────────────────────────────────────
 
-        public String getContent() {
-            return content;
-        }
-
-        public void setContent(String content) {
-            this.content = content;
-        }
+    public enum ExampleLevel {
+        FOR_CHILD,    // analogia z codzienności, dla 8-latka
+        CONTRASTIVE,  // para pokazująca różnicę / to jest X, a to NIE jest X
+        ADVANCED      // edge case, niuans, kontrintuicyjny przykład
     }
 
     public static class Example {
         private String title;
-        private String code;
+        private ExampleLevel level;
+        /** Treść przykładu — kod, wzór, opis sytuacji, dialog, scenka — cokolwiek najlepiej oddaje temat */
+        private String content;
         private String explanation;
 
-        public Example() {
-        }
+        public Example() {}
 
-        public String getTitle() {
-            return title;
-        }
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
 
-        public void setTitle(String title) {
-            this.title = title;
-        }
+        public ExampleLevel getLevel() { return level; }
+        public void setLevel(ExampleLevel level) { this.level = level; }
 
-        public String getCode() {
-            return code;
-        }
+        public String getContent() { return content; }
+        public void setContent(String content) { this.content = content; }
 
-        public void setCode(String code) {
-            this.code = code;
-        }
-
-        public String getExplanation() {
-            return explanation;
-        }
-
-        public void setExplanation(String explanation) {
-            this.explanation = explanation;
-        }
+        public String getExplanation() { return explanation; }
+        public void setExplanation(String explanation) { this.explanation = explanation; }
     }
 }
