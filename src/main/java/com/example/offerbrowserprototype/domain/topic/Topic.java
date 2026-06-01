@@ -39,7 +39,7 @@ public class Topic {
     @Builder.Default
     private TopicStatus status = TopicStatus.NEW;
 
-    @Column(name = "is_code", nullable = false)
+    @Column(name = "is_code", columnDefinition = "boolean default false not null")
     @Builder.Default
     private boolean code = false;
 
