@@ -8,8 +8,10 @@ import '@/styles/globals.css'
 
 useAuthStore.getState().rehydrate()
 
+// Token wygasł — wyloguj i przekieruj na login
 window.addEventListener('auth:expired', () => {
   useAuthStore.getState().logout()
+  router.navigate('/login', { replace: true })
 })
 
 ReactDOM.createRoot(document.getElementById('root')).render(

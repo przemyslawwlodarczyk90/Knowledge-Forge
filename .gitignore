@@ -4,9 +4,6 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
-
-
-
 ### IntelliJ IDEA ###
 .idea
 *.iws
@@ -17,3 +14,9 @@ target/
 frontend/node_modules/
 frontend/.git/
 
+### Sekrety — NIGDY do repo ###
+.env
+.env.local
+.env.*.local
+src/main/resources/application-local.properties
+src/main/resources/application-secrets.properties
