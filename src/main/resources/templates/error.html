@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Błąd aplikacji</title>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f1117;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            background: #1a1f2e;
+            border: 1px solid #2d3748;
+            border-top: 3px solid #f56565;
+            border-radius: 12px;
+            padding: 48px 40px;
+            max-width: 480px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .icon {
+            width: 56px;
+            height: 56px;
+            background: rgba(245,101,101,0.12);
+            border: 1px solid rgba(245,101,101,0.35);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            font-size: 24px;
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #f5f5f5;
+            margin-bottom: 12px;
+            letter-spacing: -0.3px;
+        }
+        .message {
+            font-size: 14px;
+            color: #cbd5e0;
+            line-height: 1.6;
+        }
+        .code {
+            display: inline-block;
+            margin-top: 24px;
+            padding: 6px 14px;
+            background: rgba(245,101,101,0.10);
+            border: 1px solid rgba(245,101,101,0.3);
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #fc8181;
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="icon">✕</div>
+    <h1>Wystąpił błąd</h1>
+    <p class="message" th:text="${message}">Coś poszło nie tak. Spróbuj ponownie.</p>
+    <div class="code">ERROR · OFFER BROWSER</div>
+</div>
+</body>
+</html>

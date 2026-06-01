@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Rejestracja potwierdzona</title>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap"
+          rel="stylesheet"/>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Syne', sans-serif;
+            background-color: #0a0a0f;
+            color: #f5f5f5;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 32px 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Subtle grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            z-index: 0;
+        }
+
+        /* Glow blob */
+        body::after {
+            content: '';
+            position: fixed;
+            top: -20%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            height: 500px;
+            background: radial-gradient(circle, rgba(34,197,94,0.08) 0%, transparent 65%);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        /* Brand mark top-left */
+        .brand {
+            position: fixed;
+            top: 24px;
+            left: 28px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            z-index: 10;
+        }
+        .brand-mark {
+            width: 32px;
+            height: 32px;
+            background: rgba(34,197,94,0.12);
+            border: 1px solid rgba(34,197,94,0.3);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Syne', sans-serif;
+            font-weight: 800;
+            font-size: 0.78rem;
+            color: #4ade80;
+        }
+        .brand-name {
+            font-family: 'Syne', sans-serif;
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: #b0b0c8;
+        }
+
+        /* Card */
+        .card {
+            position: relative;
+            z-index: 1;
+            background: #0f0f17;
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 20px;
+            padding: 52px 44px 44px;
+            max-width: 460px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+            animation: cardIn 0.4s ease both;
+        }
+
+        /* Top accent line */
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            border-radius: 20px 20px 0 0;
+            background: linear-gradient(90deg, transparent, #4ade80, transparent);
+        }
+
+        @keyframes cardIn {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Checkmark circle */
+        .check-wrap {
+            margin: 0 auto 28px;
+            width: 72px;
+            height: 72px;
+            position: relative;
+        }
+        .check-ring {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            background: rgba(34,197,94,0.10);
+            border: 1px solid rgba(34,197,94,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: ringPop 0.5s 0.15s cubic-bezier(.34,1.56,.64,1) both;
+        }
+        @keyframes ringPop {
+            from { transform: scale(0.6); opacity: 0; }
+            to   { transform: scale(1);   opacity: 1; }
+        }
+        .check-icon {
+            font-size: 28px;
+            color: #4ade80;
+            animation: checkIn 0.35s 0.35s ease both;
+        }
+        @keyframes checkIn {
+            from { opacity: 0; transform: scale(0.5); }
+            to   { opacity: 1; transform: scale(1); }
+        }
+
+        /* Status pill */
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 20px;
+            padding: 4px 12px;
+            background: rgba(34,197,94,0.08);
+            border: 1px solid rgba(34,197,94,0.25);
+            border-radius: 100px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.65rem;
+            font-weight: 500;
+            color: #4ade80;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            animation: fadeUp 0.3s 0.4s ease both;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #4ade80;
+            box-shadow: 0 0 6px #4ade80;
+            animation: pulse 2s ease infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.4; }
+        }
+
+        h1 {
+            font-family: 'Syne', sans-serif;
+            font-size: 1.65rem;
+            font-weight: 800;
+            color: #f5f5f5;
+            margin-bottom: 10px;
+            letter-spacing: -0.4px;
+            line-height: 1.2;
+            animation: fadeUp 0.3s 0.45s ease both;
+        }
+
+        .subtitle {
+            font-size: 0.85rem;
+            color: #70708a;
+            line-height: 1.6;
+            margin-bottom: 32px;
+            animation: fadeUp 0.3s 0.5s ease both;
+        }
+
+        /* Info box */
+        .info-box {
+            background: #16161f;
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 12px;
+            padding: 20px 22px;
+            text-align: left;
+            margin-bottom: 28px;
+            animation: fadeUp 0.3s 0.55s ease both;
+        }
+        .info-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .info-row:last-child { border-bottom: none; padding-bottom: 0; }
+        .info-row:first-child { padding-top: 0; }
+        .info-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: rgba(34,197,94,0.08);
+            border: 1px solid rgba(34,197,94,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
+        .info-text { flex: 1; }
+        .info-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.62rem;
+            color: #40405a;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 2px;
+        }
+        .info-value {
+            font-size: 0.82rem;
+            color: #b0b0c8;
+            line-height: 1.4;
+        }
+
+        /* CTA button */
+        .btn-login {
+            display: block;
+            width: 100%;
+            padding: 13px 24px;
+            background: #166534;
+            color: #4ade80;
+            border: 1px solid #15803d;
+            border-radius: 10px;
+            text-decoration: none;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-align: center;
+            transition: background 0.15s, box-shadow 0.15s;
+            margin-bottom: 12px;
+            animation: fadeUp 0.3s 0.6s ease both;
+        }
+        .btn-login:hover {
+            background: #14532d;
+            box-shadow: 0 0 20px rgba(34,197,94,0.2);
+        }
+
+        .hint {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.65rem;
+            color: #40405a;
+            letter-spacing: 0.05em;
+            animation: fadeUp 0.3s 0.65s ease both;
+        }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Brand -->
+<div class="brand">
+    <div class="brand-mark">OB</div>
+    <span class="brand-name">Knowledge-Forge</span>
+</div>
+
+<!-- Card -->
+<div class="card">
+
+    <!-- Check icon -->
+    <div class="check-wrap">
+        <div class="check-ring">
+            <span class="check-icon">✓</span>
+        </div>
+    </div>
+
+    <!-- Status pill -->
+    <div class="status-pill">
+        <span class="status-dot"></span>
+        Konto aktywne
+    </div>
+
+    <h1>Rejestracja potwierdzona!</h1>
+    <p class="subtitle">
+        Twoje konto zostało pomyślnie aktywowane.<br/>
+        Możesz teraz w pełni korzystać z Knowledge-Forge.
+    </p>
+
+    <!-- Info rows -->
+    <div class="info-box">
+        <div class="info-row">
+            <div class="info-icon">✓</div>
+            <div class="info-text">
+                <p class="info-label">Status konta</p>
+                <p class="info-value">Aktywne i gotowe do użycia</p>
+            </div>
+        </div>
+        <div class="info-row">
+            <div class="info-icon">◉</div>
+            <div class="info-text">
+                <p class="info-label">Następny krok</p>
+                <p class="info-value">Zaloguj się i zacznij przeglądać oferty pracy</p>
+            </div>
+        </div>
+        <div class="info-row">
+            <div class="info-icon">◷</div>
+            <div class="info-text">
+                <p class="info-label">Codzienny digest</p>
+                <p class="info-value">Będziesz otrzymywać powiadomienia e-mail z nowymi ofertami</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- CTA -->
+    <a href="/login" class="btn-login">→ Przejdź do logowania</a>
+    <p class="hint">// REGISTRATION · CONFIRMED · 2025</p>
+
+</div>
+
+</body>
+</html>
