@@ -14,3 +14,27 @@ export const authApi = {
 export const adminApi = {
   getStatus: () => api.get('/admin/status'),
 }
+
+// ── Categories ────────────────────────────────────────────────────
+export const categoriesApi = {
+  getTree:  ()           => api.get('/categories/tree'),
+  create:   (data)       => api.post('/categories', data),
+  update:   (id, data)   => api.patch(`/categories/${id}`, data),
+  remove:   (id)         => api.delete(`/categories/${id}`),
+}
+
+// ── Topics ────────────────────────────────────────────────────────
+export const topicsApi = {
+  listByCategory: (catId) => api.get(`/categories/${catId}/topics`),
+  getById:        (id)    => api.get(`/topics/${id}`),
+  create:         (data)  => api.post('/topics', data),
+  update:         (id, d) => api.patch(`/topics/${id}`, d),
+  remove:         (id)    => api.delete(`/topics/${id}`),
+}
+
+// ── Notes ─────────────────────────────────────────────────────────
+export const notesApi = {
+  getByTopic:  (topicId) => api.get(`/topics/${topicId}/note`),
+  generate:    (topicId) => api.post(`/topics/${topicId}/note/generate`),
+  regenerate:  (topicId) => api.post(`/topics/${topicId}/note/regenerate`),
+}
