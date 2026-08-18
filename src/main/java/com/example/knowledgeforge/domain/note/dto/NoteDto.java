@@ -12,16 +12,19 @@ public class NoteDto {
     /** Drzewo dokumentu edytora, z odnośnikami do obrazków przepisanymi na realne URL-e. */
     private JsonNode contentJson;
     private Integer version;
+    /** Ustawiana raz, przy pierwszym zapisie — nie zmienia się przy kolejnych edycjach. */
+    private Instant createdAt;
     private Instant updatedAt;
 
     public NoteDto() {
     }
 
-    public NoteDto(UUID id, UUID topicId, JsonNode contentJson, Integer version, Instant updatedAt) {
+    public NoteDto(UUID id, UUID topicId, JsonNode contentJson, Integer version, Instant createdAt, Instant updatedAt) {
         this.id = id;
         this.topicId = topicId;
         this.contentJson = contentJson;
         this.version = version;
+        this.createdAt = createdAt;
         this.updatedAt = updatedAt;
     }
 
@@ -36,6 +39,9 @@ public class NoteDto {
 
     public Integer getVersion() { return version; }
     public void setVersion(Integer version) { this.version = version; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }

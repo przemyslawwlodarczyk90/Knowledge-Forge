@@ -65,7 +65,7 @@ public final class Main {
         // ── Serwisy ──────────────────────────────────────────────
         TopicService topicService = new TopicService(topicDao, categoryDao, currentUser);
         CategoryService categoryService = new CategoryService(categoryDao, topicDao, currentUser);
-        NoteService noteService = new NoteService(noteDao, topicService, currentUser, noteFileStorage);
+        NoteService noteService = new NoteService(noteDao, topicService, categoryDao, currentUser, noteFileStorage);
         SearchService searchService = new SearchService(topicDao, noteDao, currentUser, noteFileStorage);
 
         // ── HTTP (Jetty embedded + zwykłe serwlety) ─────────────────

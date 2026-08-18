@@ -1,7 +1,9 @@
 package com.example.knowledgeforge.service;
 
+import com.example.knowledgeforge.dao.CategoryDao;
 import com.example.knowledgeforge.dao.NoteDao;
 import com.example.knowledgeforge.document.DocumentContainer;
+import com.example.knowledgeforge.domain.category.CategoryNode;
 import com.example.knowledgeforge.domain.exception.NotFoundException;
 import com.example.knowledgeforge.domain.exception.NoteNotFoundException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
@@ -13,6 +15,7 @@ import com.example.knowledgeforge.domain.topic.TopicStatus;
 import com.example.knowledgeforge.storage.NoteFileStorage;
 import com.fasterxml.jackson.databind.JsonNode;
 
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -33,12 +36,15 @@ public class NoteService {
 
     private final NoteDao noteDao;
     private final TopicService topicService;
+    private final CategoryDao categoryDao;
     private final CurrentUser currentUser;
     private final NoteFileStorage fileStorage;
 
-    public NoteService(NoteDao noteDao, TopicService topicService, CurrentUser currentUser, NoteFileStorage fileStorage) {
+    public NoteService(NoteDao noteDao, TopicService topicService, CategoryDao categoryDao,
+                        CurrentUser currentUser, NoteFileStorage fileStorage) {
         this.noteDao = noteDao;
         this.topicService = topicService;
+        this.categoryDao = categoryDao;
         this.currentUser = currentUser;
         this.fileStorage = fileStorage;
     }
@@ -61,30 +67,38 @@ public class NoteService {
 
         Long userId = currentUser.id();
         Topic topic = topicService.verifyOwnership(topicId, userId);
+        CategoryNode category = categoryDao.findByIdAndUserId(topic.getCategoryId(), userId).orElse(null);
 
         int assetCount = req.assets() == null ? 0 : req.assets().size();
         log.info(() -> "save " + topicId + ": incoming assets=" + assetCount);
 
-        byte[] contentBytes = DocumentContainer.of(req.contentJson(), decodeAssets(req.assets())).toBytes();
+        Note existing = noteDao.findByTopicId(topicId).orElse(null);
+        UUID noteId = existing != null ? existing.getId() : UUID.randomUUID();
+        Instant noteCreatedAt = existing != null ? existing.getCreatedAt() : Instant.now();
+        int nextVersion = existing != null ? existing.getVersion() + 1 : 1;
+
+        Map<String, Object> metadata = buildMetadata(topic, category, noteId, noteCreatedAt, nextVersion);
+        byte[] contentBytes = DocumentContainer.of(req.contentJson(), decodeAssets(req.assets()), metadata).toBytes();
         String contentPath = fileStorage.writeContent(topicId, contentBytes);
         log.fine(() -> "save " + topicId + ": wrote content -> " + contentPath);
 
-        Note note = noteDao.findByTopicId(topicId).orElse(null);
-        if (note != null) {
-            note.setContentPath(contentPath);
-            note.setVersion(note.getVersion() + 1);
-            noteDao.update(note);
-            Note updated = note;
-            log.info(() -> "save " + topicId + ": updated note " + updated.getId() + " -> version=" + updated.getVersion());
+        Note note;
+        if (existing != null) {
+            existing.setContentPath(contentPath);
+            existing.setVersion(nextVersion);
+            noteDao.update(existing);
+            note = existing;
+            log.info(() -> "save " + topicId + ": updated note " + note.getId() + " -> version=" + note.getVersion());
         } else {
             note = new Note();
+            note.setId(noteId);
             note.setUserId(userId);
             note.setTopicId(topicId);
             note.setContentPath(contentPath);
             note.setVersion(1);
+            note.setCreatedAt(noteCreatedAt);
             noteDao.insert(note);
-            Note created = note;
-            log.info(() -> "save " + topicId + ": created note " + created.getId());
+            log.info(() -> "save " + topicId + ": created note " + note.getId());
         }
 
         if (topic.getStatus() == TopicStatus.NEW) {
@@ -113,7 +127,32 @@ public class NoteService {
         DocumentContainer container = DocumentContainer.fromBytes(fileStorage.read(note.getContentPath()));
         JsonNode content = container.contentJson();
         DocumentContainer.rewriteImageSrc(content, filename -> "/api/topics/" + note.getTopicId() + "/note/assets/" + filename);
-        return new NoteDto(note.getId(), note.getTopicId(), content, note.getVersion(), note.getUpdatedAt());
+        return new NoteDto(note.getId(), note.getTopicId(), content, note.getVersion(), note.getCreatedAt(), note.getUpdatedAt());
+    }
+
+    /**
+     * Jawne metadane z encji Topic/Note, dopisywane do manifestu .kfdoc obok samej treści —
+     * plik na dysku ma więc być kompletną, samodzielną kopią (metadane + treść), czytelną
+     * poza aplikacją zwykłym archiwizatorem ZIP.
+     */
+    private Map<String, Object> buildMetadata(Topic topic, CategoryNode category, UUID noteId,
+                                               Instant noteCreatedAt, int version) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("topicId", topic.getId());
+        metadata.put("noteId", noteId);
+        metadata.put("title", topic.getTitle());
+        metadata.put("shortPrompt", topic.getShortPrompt());
+        metadata.put("author", topic.getAuthor());
+        metadata.put("type", topic.getType());
+        metadata.put("detailLevel", topic.getDetailLevel());
+        metadata.put("categoryId", topic.getCategoryId());
+        metadata.put("categoryName", category != null ? category.getName() : null);
+        metadata.put("topicCreatedAt", topic.getCreatedAt());
+        metadata.put("topicUpdatedAt", topic.getUpdatedAt());
+        metadata.put("noteCreatedAt", noteCreatedAt);
+        metadata.put("noteVersion", version);
+        metadata.put("savedAt", Instant.now());
+        return metadata;
     }
 
     private Map<String, byte[]> decodeAssets(List<SaveNoteRequest.AssetPayload> assets) {

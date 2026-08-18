@@ -1,6 +1,7 @@
 package com.example.knowledgeforge.web;
 
 import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
+import com.example.knowledgeforge.domain.topic.DetailLevel;
 import com.example.knowledgeforge.domain.topic.dto.CreateTopicRequest;
 import com.example.knowledgeforge.domain.topic.dto.UpdateTopicRequest;
 import com.example.knowledgeforge.service.NoteService;
@@ -17,6 +18,8 @@ import java.util.UUID;
  * podzasób notatki/instrukcji: /api/topics/{id}/note (treść edytora),
  * /note/assets/{plik} (wklejone obrazki). PDF generuje się wyłącznie
  * w przeglądarce, na żądanie — brak tu po niego endpointu.
+ * GET /api/topics?author=&detailLevel=&categoryId= — filtr do panelu "Filtry".
+ * GET /api/topics/authors — lista autorów do rozwijanego wyboru w filtrze.
  */
 public class TopicServlet extends ApiServlet {
 
@@ -39,7 +42,15 @@ public class TopicServlet extends ApiServlet {
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String[] seg = pathSegments(req);
-        if (seg.length == 1) {
+        if (seg.length == 0) {
+            writeJson(resp, 200, topicService.filter(
+                    blankToNull(req.getParameter("author")),
+                    parseDetailLevel(req.getParameter("detailLevel")),
+                    blankToNull(req.getParameter("categoryId")) == null ? null : parseUuid(req.getParameter("categoryId"))
+            ));
+        } else if (seg.length == 1 && "authors".equals(seg[0])) {
+            writeJson(resp, 200, topicService.listAuthors());
+        } else if (seg.length == 1) {
             writeJson(resp, 200, topicService.getById(parseUuid(seg[0])));
         } else if (seg.length == 2 && "note".equals(seg[1])) {
             writeJson(resp, 200, noteService.getByTopicId(parseUuid(seg[0])));
@@ -100,5 +111,14 @@ public class TopicServlet extends ApiServlet {
         int dot = filename.lastIndexOf('.');
         String ext = dot >= 0 ? filename.substring(dot + 1).toLowerCase() : "";
         return ASSET_CONTENT_TYPES.getOrDefault(ext, "application/octet-stream");
+    }
+
+    private String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s;
+    }
+
+    private DetailLevel parseDetailLevel(String s) {
+        String v = blankToNull(s);
+        return v == null ? null : DetailLevel.valueOf(v);
     }
 }

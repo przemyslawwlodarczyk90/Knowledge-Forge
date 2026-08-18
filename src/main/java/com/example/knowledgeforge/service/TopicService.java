@@ -2,16 +2,23 @@ package com.example.knowledgeforge.service;
 
 import com.example.knowledgeforge.dao.CategoryDao;
 import com.example.knowledgeforge.dao.TopicDao;
+import com.example.knowledgeforge.domain.category.CategoryNode;
 import com.example.knowledgeforge.domain.exception.CategoryNotFoundException;
 import com.example.knowledgeforge.domain.exception.TopicNotFoundException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.domain.topic.DetailLevel;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.domain.topic.TopicStatus;
 import com.example.knowledgeforge.domain.topic.dto.CreateTopicRequest;
 import com.example.knowledgeforge.domain.topic.dto.TopicDto;
 import com.example.knowledgeforge.domain.topic.dto.UpdateTopicRequest;
 
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -81,6 +88,51 @@ public class TopicService {
                 .stream()
                 .map(TopicDto::from)
                 .collect(Collectors.toList());
+    }
+
+    /** Autorzy użyci choć raz przez użytkownika — zasila listę wyboru w panelu filtrów. */
+    public List<String> listAuthors() {
+        return topicDao.findDistinctAuthors(currentUser.id());
+    }
+
+    /**
+     * Proste, pełne przeszukanie po filtrach (bez indeksu) — spójne z podejściem SearchService.
+     * categoryId obejmuje też wszystkie podkategorie wybranej kategorii (filtr "w dół" drzewa).
+     * Bez żadnego filtra świadomie zwraca pustą listę, żeby przypadkowe wywołanie nie zrzucało
+     * całej bazy wiedzy.
+     */
+    public List<TopicDto> filter(String author, DetailLevel detailLevel, UUID categoryId) {
+        if (author == null && detailLevel == null && categoryId == null) {
+            return List.of();
+        }
+        Long userId = currentUser.id();
+        Set<UUID> categoryScope = categoryId == null ? null : resolveCategoryScope(userId, categoryId);
+
+        return topicDao.findAllByUserId(userId).stream()
+                .filter(t -> author == null || author.equalsIgnoreCase(t.getAuthor()))
+                .filter(t -> detailLevel == null || detailLevel == t.getDetailLevel())
+                .filter(t -> categoryScope == null || categoryScope.contains(t.getCategoryId()))
+                .map(TopicDto::from)
+                .collect(Collectors.toList());
+    }
+
+    /** Wybrana kategoria + wszystkie jej podkategorie, dowolnej głębokości (obchód w głąb). */
+    private Set<UUID> resolveCategoryScope(Long userId, UUID categoryId) {
+        Map<UUID, List<CategoryNode>> byParent = categoryDao.findAllByUserId(userId).stream()
+                .filter(n -> n.getParentId() != null)
+                .collect(Collectors.groupingBy(CategoryNode::getParentId));
+
+        Set<UUID> scope = new HashSet<>();
+        Deque<UUID> stack = new ArrayDeque<>();
+        stack.push(categoryId);
+        while (!stack.isEmpty()) {
+            UUID id = stack.pop();
+            if (!scope.add(id)) continue;
+            for (CategoryNode child : byParent.getOrDefault(id, List.of())) {
+                stack.push(child.getId());
+            }
+        }
+        return scope;
     }
 
     public TopicDto update(UUID id, UpdateTopicRequest req) {

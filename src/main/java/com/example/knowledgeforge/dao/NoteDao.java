@@ -71,9 +71,10 @@ public class NoteDao {
 
     public Note insert(Note note) {
         if (note.getId() == null) note.setId(UUID.randomUUID());
-        Instant now = Instant.now();
-        note.setCreatedAt(now);
-        note.setUpdatedAt(now);
+        // createdAt bywa ustawiany z wyprzedzeniem przez NoteService (żeby dokładnie ten sam
+        // znacznik czasu trafił też do metadanych w pliku .kfdoc) — tu tylko domyślamy, gdy brak.
+        if (note.getCreatedAt() == null) note.setCreatedAt(Instant.now());
+        note.setUpdatedAt(Instant.now());
         if (note.getVersion() == null) note.setVersion(1);
 
         String sql = """

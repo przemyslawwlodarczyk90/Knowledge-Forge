@@ -12,24 +12,31 @@ public class CategoryTreeDto {
     private UUID id;
     private String name;
     private List<CategoryTreeDto> children;
+    /** Suma tematów w tej kategorii ORAZ we wszystkich jej podkategoriach (rekurencyjnie). */
+    private int topicCount;
 
     public CategoryTreeDto() {
     }
 
-    public CategoryTreeDto(UUID id, String name, List<CategoryTreeDto> children) {
+    public CategoryTreeDto(UUID id, String name, List<CategoryTreeDto> children, int topicCount) {
         this.id = id;
         this.name = name;
         this.children = children;
+        this.topicCount = topicCount;
     }
 
-    public static CategoryTreeDto fromRoot(CategoryNode root, Map<UUID, List<CategoryNode>> byParent) {
+    public static CategoryTreeDto fromRoot(CategoryNode root, Map<UUID, List<CategoryNode>> byParent,
+                                            Map<UUID, Integer> directTopicCounts) {
         List<CategoryNode> directChildren = byParent.getOrDefault(root.getId(), List.of());
         List<CategoryTreeDto> childDtos = directChildren.stream()
                 .filter(node -> !node.isRoot())
-                .map(node -> fromRoot(node, byParent))
+                .map(node -> fromRoot(node, byParent, directTopicCounts))
                 .collect(Collectors.toList());
 
-        return new CategoryTreeDto(root.getId(), root.getName(), childDtos);
+        int ownCount = directTopicCounts.getOrDefault(root.getId(), 0);
+        int totalCount = ownCount + childDtos.stream().mapToInt(CategoryTreeDto::getTopicCount).sum();
+
+        return new CategoryTreeDto(root.getId(), root.getName(), childDtos, totalCount);
     }
 
     public UUID getId() { return id; }
@@ -40,4 +47,7 @@ public class CategoryTreeDto {
 
     public List<CategoryTreeDto> getChildren() { return children; }
     public void setChildren(List<CategoryTreeDto> children) { this.children = children; }
+
+    public int getTopicCount() { return topicCount; }
+    public void setTopicCount(int topicCount) { this.topicCount = topicCount; }
 }

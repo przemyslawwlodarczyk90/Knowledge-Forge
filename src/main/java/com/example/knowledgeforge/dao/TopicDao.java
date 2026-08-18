@@ -13,7 +13,9 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.logging.Level;
@@ -72,6 +74,41 @@ public class TopicDao {
             }
         } catch (SQLException e) {
             throw new RuntimeException("Failed to list topics by category", e);
+        }
+    }
+
+    /** Liczba tematów na kategorię (bezpośrednio w niej, bez podkategorii) — do cyferki w drzewie. */
+    public Map<UUID, Integer> countByCategoryForUser(Long userId) {
+        String sql = "SELECT category_id, COUNT(*) AS cnt FROM topic WHERE user_id = ? GROUP BY category_id";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                Map<UUID, Integer> result = new HashMap<>();
+                while (rs.next()) {
+                    result.put(rs.getObject("category_id", UUID.class), rs.getInt("cnt"));
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count topics by category", e);
+        }
+    }
+
+    /** Autorzy użyci choć raz — do rozwijanej listy w filtrach. Autor dziś jest ręczny placeholder;
+     *  docelowo będzie zczytywany z tokena, ale zapytanie już ma sens niezależnie od tego. */
+    public List<String> findDistinctAuthors(Long userId) {
+        String sql = "SELECT DISTINCT author FROM topic WHERE user_id = ? AND author IS NOT NULL AND author <> '' ORDER BY author";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> result = new ArrayList<>();
+                while (rs.next()) result.add(rs.getString("author"));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list distinct authors", e);
         }
     }
 

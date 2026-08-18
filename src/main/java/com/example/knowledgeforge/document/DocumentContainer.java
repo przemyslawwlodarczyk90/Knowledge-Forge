@@ -19,12 +19,20 @@ import java.util.zip.ZipOutputStream;
  * To zwykły ZIP (java.util.zip, biblioteka standardowa — zero zależności),
  * dokładnie ten sam pomysł co .docx/.odt:
  *
- *   manifest.json     — {"format":"kfdoc","version":1}
+ *   manifest.json     — {"format":"kfdoc","version":1,"metadata":{...}}
  *   content.json      — drzewo dokumentu edytora (ProseMirror/TipTap JSON)
  *   assets/&lt;id&gt;.png  — wklejone obrazki, referencjonowane z content.json
  *                        przez "asset:&lt;id&gt;.png" zamiast base64 w środku drzewa
  *
- * Całość trzymana jest jako jedna kolumna BYTEA w tabeli note.
+ * "metadata" w manifeście to jawne pola z encji (tytuł, autor, kategoria,
+ * poziom szczegółowości, daty utworzenia...) — plik na dysku jest więc
+ * samodzielną sumą metadanych + treści, a nie tylko surowym contentem.
+ * Dzięki temu, że to zwykły ZIP z czytelnym JSON-em w środku, każdy plik
+ * .kfdoc da się otworzyć i odczytać poza aplikacją zwykłym, ogólnodostępnym
+ * archiwizatorem (Eksplorator Windows, 7-Zip, `unzip`...) — bez żadnego
+ * własnego narzędzia do deszyfrowania.
+ *
+ * Całość trzymana jest jako jeden plik na dysku, zob. storage.NoteFileStorage.
  */
 public final class DocumentContainer {
 
@@ -35,18 +43,25 @@ public final class DocumentContainer {
 
     private final JsonNode contentJson;
     private final Map<String, byte[]> assets;
+    private final Map<String, Object> metadata;
 
-    private DocumentContainer(JsonNode contentJson, Map<String, byte[]> assets) {
+    private DocumentContainer(JsonNode contentJson, Map<String, byte[]> assets, Map<String, Object> metadata) {
         this.contentJson = contentJson;
         this.assets = assets;
+        this.metadata = metadata;
     }
 
     public static DocumentContainer of(JsonNode contentJson, Map<String, byte[]> assets) {
-        return new DocumentContainer(contentJson, assets);
+        return new DocumentContainer(contentJson, assets, Map.of());
+    }
+
+    /** metadata — jawne pola z encji Topic/Note, dopisywane do manifestu obok treści. */
+    public static DocumentContainer of(JsonNode contentJson, Map<String, byte[]> assets, Map<String, Object> metadata) {
+        return new DocumentContainer(contentJson, assets, metadata);
     }
 
     public static DocumentContainer empty() {
-        return new DocumentContainer(JsonMapper.get().createObjectNode(), Map.of());
+        return new DocumentContainer(JsonMapper.get().createObjectNode(), Map.of(), Map.of());
     }
 
     public JsonNode contentJson() {
@@ -57,11 +72,20 @@ public final class DocumentContainer {
         return assets.get(filename);
     }
 
+    /** Metadane odczytane z manifestu (pusta mapa, jeśli plik ich nie zawierał — starszy zapis). */
+    public Map<String, Object> metadata() {
+        return metadata;
+    }
+
     public byte[] toBytes() {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (ZipOutputStream zip = new ZipOutputStream(baos)) {
-                putEntry(zip, MANIFEST_ENTRY, JsonMapper.get().writeValueAsBytes(Map.of("format", "kfdoc", "version", 1)));
+                Map<String, Object> manifest = new HashMap<>();
+                manifest.put("format", "kfdoc");
+                manifest.put("version", 1);
+                manifest.put("metadata", metadata);
+                putEntry(zip, MANIFEST_ENTRY, JsonMapper.get().writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest));
                 putEntry(zip, CONTENT_ENTRY, JsonMapper.get().writeValueAsBytes(contentJson));
                 for (Map.Entry<String, byte[]> asset : assets.entrySet()) {
                     putEntry(zip, ASSET_PREFIX + asset.getKey(), asset.getValue());
@@ -73,17 +97,25 @@ public final class DocumentContainer {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public static DocumentContainer fromBytes(byte[] zipBytes) {
         if (zipBytes == null || zipBytes.length == 0) return empty();
 
         JsonNode content = JsonMapper.get().createObjectNode();
         Map<String, byte[]> assets = new HashMap<>();
+        Map<String, Object> metadata = Map.of();
         try (ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
             ZipEntry entry;
             while ((entry = zin.getNextEntry()) != null) {
                 byte[] data = zin.readAllBytes();
                 if (entry.getName().equals(CONTENT_ENTRY)) {
                     content = JsonMapper.get().readTree(data);
+                } else if (entry.getName().equals(MANIFEST_ENTRY)) {
+                    Map<String, Object> manifest = JsonMapper.get().readValue(data, Map.class);
+                    Object m = manifest.get("metadata");
+                    if (m instanceof Map) {
+                        metadata = (Map<String, Object>) m;
+                    }
                 } else if (entry.getName().startsWith(ASSET_PREFIX)) {
                     assets.put(entry.getName().substring(ASSET_PREFIX.length()), data);
                 }
@@ -92,7 +124,7 @@ public final class DocumentContainer {
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read .kfdoc container", e);
         }
-        return new DocumentContainer(content, assets);
+        return new DocumentContainer(content, assets, metadata);
     }
 
     /**
