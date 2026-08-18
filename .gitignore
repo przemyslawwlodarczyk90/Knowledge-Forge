@@ -18,5 +18,8 @@ frontend/.git/
 .env
 .env.local
 .env.*.local
-src/main/resources/application-local.properties
-src/main/resources/application-secrets.properties
+src/main/resources/config-local.properties
+dependency-reduced-pom.xml
+
+### Dane użytkownika — pliki notatek na dysku (zob. notes.storage.path) ###
+/data/
