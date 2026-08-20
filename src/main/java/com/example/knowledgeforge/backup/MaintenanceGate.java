@@ -19,6 +19,19 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class MaintenanceGate {
 
+    // MULTI-THREADING:
+    // operationLock (ReentrantLock) — wzajemne wykluczenie DatabaseBackupService i
+    // DatabaseRestoreService, żeby backup i restore nigdy nie ruszyły na tej samej bazie
+    // jednocześnie (pg_dump czytający w trakcie gdy pg_restore nadpisuje dane byłby co
+    // najmniej niespójny, a prawdopodobnie zakończyłby się błędem). tryLock() jest
+    // NIEBLOKUJĄCE z rozmysłem — druga jednoczesna próba (np. dwa równoległe żądania restore)
+    // ma dostać natychmiastową, jawną odmowę (409 z warstwy servletu), a nie czekać w kolejce
+    // na operację, która i tak może trwać długo (pg_dump/pg_restore całej bazy). Zakres blokady
+    // to WYŁĄCZNIE "czy backup/restore już trwa" — nie chroni activeWrites/maintenanceMode/
+    // awaitingRestart (te są już same w sobie thread-safe, przez Atomic*), więc nigdy nie
+    // zdobywamy dwóch locków naraz. Zwalniana jawnie przez releaseOperation() w finally
+    // wywołującego (DatabaseBackupService/DatabaseRestoreService), zaraz po zakończeniu
+    // pg_dump/pg_restore (sukces lub błąd — zawsze).
     private final ReentrantLock operationLock = new ReentrantLock();
     private final AtomicBoolean maintenanceMode = new AtomicBoolean(false);
     private final AtomicInteger activeWrites = new AtomicInteger(0);
