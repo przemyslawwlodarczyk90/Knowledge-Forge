@@ -148,7 +148,7 @@ public final class Main {
 
         heartbeat.start(Duration.ofSeconds(25));
 
-        log.info("Knowledge-Forge running on http://localhost:" + config.serverPort() + " (no login required)");
+        log.info("Knowledge Forge 2.0 running on http://localhost:" + config.serverPort() + " (no login required)");
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             // Kolejność ma znaczenie: najpierw przestajemy przyjmować nowe żądania/połączenia
