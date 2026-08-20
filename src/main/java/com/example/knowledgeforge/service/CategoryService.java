@@ -35,7 +35,8 @@ public class CategoryService {
                 .orElseGet(() -> createVirtualRoot(userId));
         List<CategoryNode> all = categoryDao.findAllByUserId(userId);
         Map<UUID, Integer> topicCounts = topicDao.countByCategoryForUser(userId);
-        return buildTree(root, all, topicCounts);
+        Map<UUID, Integer> lowDetailCounts = topicDao.countLowDetailByCategoryForUser(userId);
+        return buildTree(root, all, topicCounts, lowDetailCounts);
     }
 
     public CategoryDto create(CreateCategoryRequest req) {
@@ -115,11 +116,12 @@ public class CategoryService {
         return categoryDao.insert(root);
     }
 
-    private CategoryTreeDto buildTree(CategoryNode root, List<CategoryNode> all, Map<UUID, Integer> topicCounts) {
+    private CategoryTreeDto buildTree(CategoryNode root, List<CategoryNode> all, Map<UUID, Integer> topicCounts,
+                                       Map<UUID, Integer> lowDetailCounts) {
         Map<UUID, List<CategoryNode>> byParent = all.stream()
                 .filter(n -> n.getParentId() != null)
                 .collect(Collectors.groupingBy(CategoryNode::getParentId));
 
-        return CategoryTreeDto.fromRoot(root, byParent, topicCounts);
+        return CategoryTreeDto.fromRoot(root, byParent, topicCounts, lowDetailCounts);
     }
 }

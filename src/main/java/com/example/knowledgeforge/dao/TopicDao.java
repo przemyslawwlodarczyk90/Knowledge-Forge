@@ -95,6 +95,25 @@ public class TopicDao {
         }
     }
 
+    /** Liczba tematów niskiego poziomu szczegółowości na kategorię (bezpośrednio w niej, bez podkategorii) —
+     *  te tematy są domyślnie ukryte w drzewie, więc licznik w UI musi je umieć odjąć od sumy. */
+    public Map<UUID, Integer> countLowDetailByCategoryForUser(Long userId) {
+        String sql = "SELECT category_id, COUNT(*) AS cnt FROM topic WHERE user_id = ? AND detail_level = 'LOW' GROUP BY category_id";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                Map<UUID, Integer> result = new HashMap<>();
+                while (rs.next()) {
+                    result.put(rs.getObject("category_id", UUID.class), rs.getInt("cnt"));
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count low-detail topics by category", e);
+        }
+    }
+
     /** Autorzy użyci choć raz — do rozwijanej listy w filtrach. Autor dziś jest ręczny placeholder;
      *  docelowo będzie zczytywany z tokena, ale zapytanie już ma sens niezależnie od tego. */
     public List<String> findDistinctAuthors(Long userId) {
