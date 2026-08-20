@@ -1,15 +1,21 @@
 package com.example.knowledgeforge.web;
 
+import com.example.knowledgeforge.domain.exception.PayloadTooLargeException;
+import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
 import com.example.knowledgeforge.domain.topic.DetailLevel;
 import com.example.knowledgeforge.domain.topic.dto.CreateTopicRequest;
 import com.example.knowledgeforge.domain.topic.dto.UpdateTopicRequest;
+import com.example.knowledgeforge.service.AttachmentService;
 import com.example.knowledgeforge.service.NoteService;
 import com.example.knowledgeforge.service.TopicService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Part;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
 
@@ -33,10 +39,12 @@ public class TopicServlet extends ApiServlet {
 
     private final TopicService topicService;
     private final NoteService noteService;
+    private final AttachmentService attachmentService;
 
-    public TopicServlet(TopicService topicService, NoteService noteService) {
+    public TopicServlet(TopicService topicService, NoteService noteService, AttachmentService attachmentService) {
         this.topicService = topicService;
         this.noteService = noteService;
+        this.attachmentService = attachmentService;
     }
 
     @Override
@@ -57,6 +65,8 @@ public class TopicServlet extends ApiServlet {
         } else if (seg.length == 4 && "note".equals(seg[1]) && "assets".equals(seg[2])) {
             byte[] data = noteService.getAsset(parseUuid(seg[0]), seg[3]);
             writeBinary(resp, 200, contentTypeFor(seg[3]), data);
+        } else if (seg.length == 2 && "attachments".equals(seg[1])) {
+            writeJson(resp, 200, attachmentService.listByTopic(parseUuid(seg[0])));
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
         }
@@ -66,10 +76,60 @@ public class TopicServlet extends ApiServlet {
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String[] seg = pathSegments(req);
         if (seg.length == 0) {
-            var dto = topicService.create(readJson(req, CreateTopicRequest.class));
+            var dto = topicService.create(readJson(req, CreateTopicRequest.class), clientId(req));
             writeJson(resp, 201, dto);
+        } else if (seg.length == 2 && "attachments".equals(seg[1])) {
+            handleUploadAttachment(parseUuid(seg[0]), req, resp);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    /**
+     * multipart/form-data: pole "file" (wymagane) + opcjonalny "description". MultipartConfig
+     * jest zarejestrowany na tym serwlecie w Main.java (fileSizeThreshold=0 -> Jetty od razu
+     * spilluje część na dysk zamiast buforować duży plik w pamięci); AttachmentService dalej
+     * kopiuje ją strumieniowo do docelowego katalogu, licząc SHA-256 w locie.
+     */
+    private void handleUploadAttachment(UUID topicId, HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        Part filePart;
+        try {
+            filePart = req.getPart("file");
+        } catch (IllegalStateException e) {
+            // Jetty rzuca to, gdy część przekracza MultipartConfigElement#getMaxFileSize()
+            throw new PayloadTooLargeException("Uploaded file exceeds the configured size limit");
+        } catch (Exception e) {
+            throw new ValidationException("Malformed multipart upload: " + e.getMessage());
+        }
+        if (filePart == null || filePart.getSize() == 0) {
+            throw new ValidationException("Missing or empty 'file' part");
+        }
+        String originalName = filePart.getSubmittedFileName();
+        if (originalName == null || originalName.isBlank()) {
+            throw new ValidationException("Missing file name");
+        }
+
+        String description = readOptionalTextPart(req, "description");
+
+        log.info(() -> "Attachment upload starting: topic=" + topicId + " name='" + originalName
+                + "' declaredSize=" + filePart.getSize() + " declaredContentType=" + filePart.getContentType());
+
+        try (InputStream in = filePart.getInputStream()) {
+            var dto = attachmentService.upload(topicId, originalName, filePart.getContentType(), in, description, clientId(req));
+            writeJson(resp, 201, dto);
+        }
+    }
+
+    private String readOptionalTextPart(HttpServletRequest req, String name) throws IOException {
+        Part part;
+        try {
+            part = req.getPart(name);
+        } catch (Exception e) {
+            return null;
+        }
+        if (part == null) return null;
+        try (InputStream in = part.getInputStream()) {
+            return new String(in.readNBytes(4096), StandardCharsets.UTF_8);
         }
     }
 
@@ -77,7 +137,7 @@ public class TopicServlet extends ApiServlet {
     protected void doPut(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String[] seg = pathSegments(req);
         if (seg.length == 2 && "note".equals(seg[1])) {
-            var dto = noteService.save(parseUuid(seg[0]), readJson(req, SaveNoteRequest.class));
+            var dto = noteService.save(parseUuid(seg[0]), readJson(req, SaveNoteRequest.class), clientId(req));
             writeJson(resp, 200, dto);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -89,7 +149,7 @@ public class TopicServlet extends ApiServlet {
         String[] seg = pathSegments(req);
         if (seg.length == 1) {
             UUID id = parseUuid(seg[0]);
-            var dto = topicService.update(id, readJson(req, UpdateTopicRequest.class));
+            var dto = topicService.update(id, readJson(req, UpdateTopicRequest.class), clientId(req));
             writeJson(resp, 200, dto);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -100,7 +160,7 @@ public class TopicServlet extends ApiServlet {
     protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String[] seg = pathSegments(req);
         if (seg.length == 1) {
-            topicService.delete(parseUuid(seg[0]));
+            topicService.delete(parseUuid(seg[0]), clientId(req));
             resp.setStatus(204);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);

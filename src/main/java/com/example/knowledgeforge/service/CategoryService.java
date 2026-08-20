@@ -11,6 +11,7 @@ import com.example.knowledgeforge.domain.exception.CategoryNotFoundException;
 import com.example.knowledgeforge.domain.exception.ConflictException;
 import com.example.knowledgeforge.domain.exception.ForbiddenException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.ws.ApplicationEventHub;
 
 import java.util.List;
 import java.util.Map;
@@ -22,11 +23,13 @@ public class CategoryService {
     private final CategoryDao categoryDao;
     private final TopicDao topicDao;
     private final CurrentUser currentUser;
+    private final ApplicationEventHub eventHub;
 
-    public CategoryService(CategoryDao categoryDao, TopicDao topicDao, CurrentUser currentUser) {
+    public CategoryService(CategoryDao categoryDao, TopicDao topicDao, CurrentUser currentUser, ApplicationEventHub eventHub) {
         this.categoryDao = categoryDao;
         this.topicDao = topicDao;
         this.currentUser = currentUser;
+        this.eventHub = eventHub;
     }
 
     public CategoryTreeDto getTree() {
@@ -39,7 +42,7 @@ public class CategoryService {
         return buildTree(root, all, topicCounts, lowDetailCounts);
     }
 
-    public CategoryDto create(CreateCategoryRequest req) {
+    public CategoryDto create(CreateCategoryRequest req, String clientId) {
         if (req.name() == null || req.name().isBlank()) {
             throw new ValidationException("name must not be blank");
         }
@@ -66,10 +69,12 @@ public class CategoryService {
         node.setPosition(0);
         node.setRoot(false);
 
-        return CategoryDto.from(categoryDao.insert(node));
+        CategoryDto dto = CategoryDto.from(categoryDao.insert(node));
+        eventHub.categoryCreated(dto, String.valueOf(userId), clientId);
+        return dto;
     }
 
-    public CategoryDto update(UUID id, UpdateCategoryRequest req) {
+    public CategoryDto update(UUID id, UpdateCategoryRequest req, String clientId) {
         if (req.name() == null || req.name().isBlank()) {
             throw new ValidationException("name must not be blank");
         }
@@ -84,10 +89,12 @@ public class CategoryService {
 
         node.setName(req.name());
 
-        return CategoryDto.from(categoryDao.update(node));
+        CategoryDto dto = CategoryDto.from(categoryDao.update(node));
+        eventHub.categoryUpdated(dto, String.valueOf(userId), clientId);
+        return dto;
     }
 
-    public void delete(UUID id) {
+    public void delete(UUID id, String clientId) {
         Long userId = currentUser.id();
         CategoryNode node = categoryDao.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new CategoryNotFoundException(id.toString()));
@@ -105,6 +112,7 @@ public class CategoryService {
         }
 
         categoryDao.delete(id);
+        eventHub.categoryDeleted(id, node.getParentId(), String.valueOf(userId), clientId);
     }
 
     private CategoryNode createVirtualRoot(Long userId) {

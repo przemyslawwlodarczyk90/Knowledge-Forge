@@ -37,7 +37,7 @@ public class CategoryServlet extends ApiServlet {
     protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String[] seg = pathSegments(req);
         if (seg.length == 0) {
-            var dto = categoryService.create(readJson(req, CreateCategoryRequest.class));
+            var dto = categoryService.create(readJson(req, CreateCategoryRequest.class), clientId(req));
             writeJson(resp, 201, dto);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -49,7 +49,7 @@ public class CategoryServlet extends ApiServlet {
         String[] seg = pathSegments(req);
         if (seg.length == 1) {
             UUID id = parseUuid(seg[0]);
-            var dto = categoryService.update(id, readJson(req, UpdateCategoryRequest.class));
+            var dto = categoryService.update(id, readJson(req, UpdateCategoryRequest.class), clientId(req));
             writeJson(resp, 200, dto);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
@@ -60,7 +60,7 @@ public class CategoryServlet extends ApiServlet {
     protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
         String[] seg = pathSegments(req);
         if (seg.length == 1) {
-            categoryService.delete(parseUuid(seg[0]));
+            categoryService.delete(parseUuid(seg[0]), clientId(req));
             resp.setStatus(204);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);

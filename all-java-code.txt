@@ -1,0 +1,3132 @@
+
+
+===== ./src/main/java/com/example/knowledgeforge/Main.java =====
+
+package com.example.knowledgeforge;
+
+import com.example.knowledgeforge.config.AppConfig;
+import com.example.knowledgeforge.config.Database;
+import com.example.knowledgeforge.config.DefaultUserSeeder;
+import com.example.knowledgeforge.config.Schema;
+import com.example.knowledgeforge.dao.CategoryDao;
+import com.example.knowledgeforge.dao.NoteDao;
+import com.example.knowledgeforge.dao.TopicDao;
+import com.example.knowledgeforge.dao.UserDao;
+import com.example.knowledgeforge.service.CategoryService;
+import com.example.knowledgeforge.service.CurrentUser;
+import com.example.knowledgeforge.service.NoteService;
+import com.example.knowledgeforge.service.SearchService;
+import com.example.knowledgeforge.service.TopicService;
+import com.example.knowledgeforge.storage.NoteFileStorage;
+import com.example.knowledgeforge.web.CategoryServlet;
+import com.example.knowledgeforge.web.CorsFilter;
+import com.example.knowledgeforge.web.SearchServlet;
+import com.example.knowledgeforge.web.SpaServlet;
+import com.example.knowledgeforge.web.TopicServlet;
+import com.zaxxer.hikari.HikariDataSource;
+import jakarta.servlet.DispatcherType;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.servlet.FilterHolder;
+import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHolder;
+
+import java.nio.file.Path;
+import java.util.EnumSet;
+import java.util.logging.ConsoleHandler;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
+
+/**
+ * Punkt wejścia i "composition root" — całe drzewo obiektów (DAO -> serwisy
+ * -> serwlety) jest tu ręcznie spięte przez zwykłe konstruktory. Bez
+ * kontenera IoC, bez reflection, bez adnotacji — to, co widać, to
+ * wszystko, co się dzieje.
+ */
+public final class Main {
+
+    private static final Logger log = Logger.getLogger(Main.class.getName());
+
+    public static void main(String[] args) throws Exception {
+        AppConfig config = AppConfig.load();
+        if (config.debugLogging()) {
+            configureDebugLogging();
+        }
+
+        HikariDataSource dataSource = Database.createDataSource(config);
+        Schema.ensure(dataSource);
+
+        // ── DAO ──────────────────────────────────────────────────
+        UserDao userDao = new UserDao(dataSource);
+        CategoryDao categoryDao = new CategoryDao(dataSource);
+        TopicDao topicDao = new TopicDao(dataSource);
+        NoteDao noteDao = new NoteDao(dataSource);
+
+        DefaultUserSeeder.ensure(userDao, config);
+        CurrentUser currentUser = new CurrentUser(userDao, config.defaultUsername());
+        NoteFileStorage noteFileStorage = new NoteFileStorage(Path.of(config.notesStoragePath()));
+
+        // ── Serwisy ──────────────────────────────────────────────
+        TopicService topicService = new TopicService(topicDao, categoryDao, currentUser);
+        CategoryService categoryService = new CategoryService(categoryDao, topicDao, currentUser);
+        NoteService noteService = new NoteService(noteDao, topicService, categoryDao, currentUser, noteFileStorage);
+        SearchService searchService = new SearchService(topicDao, noteDao, currentUser, noteFileStorage);
+
+        // ── HTTP (Jetty embedded + zwykłe serwlety) ─────────────────
+        Server server = new Server(config.serverPort());
+        ServletContextHandler ctx = new ServletContextHandler();
+        ctx.setContextPath("/");
+
+        ctx.addFilter(new FilterHolder(new CorsFilter(config.corsAllowedOrigin())), "/*",
+                EnumSet.of(DispatcherType.REQUEST));
+
+        ctx.addServlet(new ServletHolder(new TopicServlet(topicService, noteService)), "/api/topics/*");
+        ctx.addServlet(new ServletHolder(new CategoryServlet(categoryService, topicService)), "/api/categories/*");
+        ctx.addServlet(new ServletHolder(new SearchServlet(searchService)), "/api/search");
+        ctx.addServlet(new ServletHolder(new SpaServlet()), "/");
+
+        server.setHandler(ctx);
+        server.start();
+
+        log.info("Knowledge-Forge running on http://localhost:" + config.serverPort() + " (no login required)");
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                server.stop();
+            } catch (Exception e) {
+                log.warning("Error while stopping Jetty: " + e.getMessage());
+            }
+            dataSource.close();
+        }));
+
+        server.join();
+    }
+
+    /**
+     * java.util.logging domyślnie pokazuje tylko INFO+ — bez tego wszystkie
+     * log.fine(...) rozsiane po DAO/serwisach/serwletach byłyby niewidoczne.
+     * Włączone domyślnie (debug.logging=true); wyłącz w prod przez DEBUG_LOGGING=false.
+     */
+    private static void configureDebugLogging() {
+        Logger appLogger = Logger.getLogger("com.example.knowledgeforge");
+        appLogger.setLevel(Level.FINE);
+        appLogger.setUseParentHandlers(false);
+
+        ConsoleHandler handler = new ConsoleHandler();
+        handler.setLevel(Level.FINE);
+        handler.setFormatter(new SimpleFormatter());
+        appLogger.addHandler(handler);
+    }
+
+    private Main() {
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/config/AppConfig.java =====
+
+package com.example.knowledgeforge.config;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Locale;
+import java.util.Properties;
+
+/**
+ * Ładuje config.properties z classpath, opcjonalnie nadpisywany przez
+ * config-local.properties (gitignorowany, na sekrety lokalne) i przez
+ * zmienne środowiskowe — konwencja: "db.url" -> zmienna "DB_URL".
+ * Zastępuje mechanizm @Value / @ConfigurationProperties ze Springa.
+ */
+public class AppConfig {
+
+    private final Properties props;
+
+    private AppConfig(Properties props) {
+        this.props = props;
+    }
+
+    public static AppConfig load() {
+        Properties props = new Properties();
+        loadInto(props, "/config.properties", true);
+        loadInto(props, "/config-local.properties", false);
+        return new AppConfig(props);
+    }
+
+    private static void loadInto(Properties props, String resource, boolean required) {
+        try (InputStream in = AppConfig.class.getResourceAsStream(resource)) {
+            if (in == null) {
+                if (required) throw new IllegalStateException("Missing required classpath resource: " + resource);
+                return;
+            }
+            props.load(in);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to load " + resource, e);
+        }
+    }
+
+    private String get(String key, String defaultValue) {
+        String envKey = key.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');
+        String fromEnv = System.getenv(envKey);
+        if (fromEnv != null && !fromEnv.isBlank()) return fromEnv;
+        return props.getProperty(key, defaultValue);
+    }
+
+    public int serverPort() {
+        return Integer.parseInt(get("server.port", "8081"));
+    }
+
+    public String dbUrl() {
+        return get("db.url", "jdbc:postgresql://localhost:5432/pgDB");
+    }
+
+    public String dbUsername() {
+        return get("db.username", "user");
+    }
+
+    public String dbPassword() {
+        return get("db.password", "password");
+    }
+
+    public String corsAllowedOrigin() {
+        return get("cors.allowed-origin", "http://localhost:3000");
+    }
+
+    public String defaultUsername() {
+        return get("default-user.username", "default");
+    }
+
+    public String defaultUserEmail() {
+        return get("default-user.email", "default@knowledge-forge.local");
+    }
+
+    /** Folder na dysku, gdzie leżą pliki notatek (.kfdoc) i wygenerowane PDF-y — baza trzyma tylko ścieżki. */
+    public String notesStoragePath() {
+        return get("notes.storage.path", "./data/notes");
+    }
+
+    /** Włącza szczegółowe logi (FINE) z pakietu aplikacji — domyślnie włączone, wyłącz w prod przez DEBUG_LOGGING=false. */
+    public boolean debugLogging() {
+        return Boolean.parseBoolean(get("debug.logging", "true"));
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/config/Database.java =====
+
+package com.example.knowledgeforge.config;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+
+/** Tworzy pulę połączeń JDBC (HikariCP) — jedyna "magia" to pooling, bez ORM. */
+public final class Database {
+
+    private Database() {
+    }
+
+    public static HikariDataSource createDataSource(AppConfig config) {
+        HikariConfig hc = new HikariConfig();
+        hc.setJdbcUrl(config.dbUrl());
+        hc.setUsername(config.dbUsername());
+        hc.setPassword(config.dbPassword());
+        hc.setDriverClassName("org.postgresql.Driver");
+        hc.setMaximumPoolSize(10);
+        hc.setMinimumIdle(2);
+        hc.setPoolName("knowledge-forge-pool");
+        return new HikariDataSource(hc);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/config/DefaultUserSeeder.java =====
+
+package com.example.knowledgeforge.config;
+
+import com.example.knowledgeforge.dao.UserDao;
+import com.example.knowledgeforge.domain.user.User;
+
+import java.util.logging.Logger;
+
+/**
+ * Aplikacja działa bez logowania — na starcie zakłada jednego domyślnego
+ * użytkownika, jeśli jeszcze nie istnieje. Wszystkie dane są przypisywane
+ * do niego (zob. service.CurrentUser).
+ */
+public final class DefaultUserSeeder {
+
+    private static final Logger log = Logger.getLogger(DefaultUserSeeder.class.getName());
+
+    private DefaultUserSeeder() {
+    }
+
+    public static void ensure(UserDao userDao, AppConfig config) {
+        String username = config.defaultUsername();
+        if (userDao.findByUsername(username).isPresent()) {
+            log.info("Default user '" + username + "' already exists — skipping seed");
+            return;
+        }
+        User user = new User();
+        user.setUsername(username);
+        user.setEmail(config.defaultUserEmail());
+        user.setActive(true);
+        userDao.insert(user);
+        log.info("Default user '" + username + "' created successfully");
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/config/Schema.java =====
+
+package com.example.knowledgeforge.config;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import javax.sql.DataSource;
+import java.util.List;
+import java.util.logging.Logger;
+
+/**
+ * Zastępuje Hibernate ddl-auto=update. Bezpieczne do uruchamiania przy
+ * każdym starcie — działa zarówno na świeżej bazie (same CREATE TABLE),
+ * jak i na istniejącej (dokłada/usuwa kolumny, jednorazowo przepisuje
+ * stare wartości na nowe). Migracje, które CZYTAJĄ wartość kolumny mającej
+ * zniknąć (np. "CASE difficulty WHEN ...") nie mogą być samym "IF EXISTS"
+ * w treści zapytania — Postgres waliduje odwołanie do kolumny przy
+ * parsowaniu, niezależnie od warunku w WHERE. Dlatego takie migracje są
+ * osobnymi metodami, chronione sprawdzeniem information_schema w Javie.
+ */
+public final class Schema {
+
+    private static final Logger log = Logger.getLogger(Schema.class.getName());
+
+    private static final List<String> STATEMENTS = List.of(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                username TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL,
+                active BOOLEAN NOT NULL DEFAULT FALSE
+            )
+            """,
+            "ALTER TABLE users DROP COLUMN IF EXISTS password",
+            "ALTER TABLE users DROP COLUMN IF EXISTS role",
+
+            """
+            CREATE TABLE IF NOT EXISTS category_node (
+                id UUID PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id),
+                parent_id UUID REFERENCES category_node(id),
+                name TEXT NOT NULL,
+                position INT NOT NULL DEFAULT 0,
+                root BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """,
+            // Opisy kategorii/podkategorii uznane za zbędne — sam tytuł wystarczy.
+            "ALTER TABLE category_node DROP COLUMN IF EXISTS description",
+
+            """
+            CREATE TABLE IF NOT EXISTS topic (
+                id UUID PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id),
+                category_id UUID NOT NULL REFERENCES category_node(id),
+                title TEXT NOT NULL,
+                short_prompt TEXT,
+                author TEXT,
+                detail_level TEXT NOT NULL DEFAULT 'MEDIUM',
+                type TEXT NOT NULL DEFAULT 'NOTE',
+                status TEXT NOT NULL DEFAULT 'NEW',
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """,
+
+            "ALTER TABLE topic ADD COLUMN IF NOT EXISTS author TEXT",
+
+            "ALTER TABLE topic ADD COLUMN IF NOT EXISTS type TEXT",
+            "UPDATE topic SET type = 'NOTE' WHERE type IS NULL",
+            "ALTER TABLE topic ALTER COLUMN type SET NOT NULL",
+            "ALTER TABLE topic DROP COLUMN IF EXISTS is_code",
+
+            "ALTER TABLE topic DROP CONSTRAINT IF EXISTS topic_status_check",
+            "UPDATE topic SET status = 'NOTE_ADDED' WHERE status IN ('NOTE_GENERATED', 'QUIZ_READY', 'PASSED', 'MASTERED')",
+
+            """
+            CREATE TABLE IF NOT EXISTS note (
+                id UUID PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id),
+                topic_id UUID NOT NULL UNIQUE REFERENCES topic(id),
+                content_path TEXT,
+                version INT NOT NULL DEFAULT 1,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """,
+            // Treść notatek przeniesiona na dysk (zob. storage.NoteFileStorage) — baza
+            // trzyma tylko ścieżkę. PDF w ogóle nie jest przechowywany — generuje się
+            // wyłącznie w przeglądarce, na żądanie. Stare kolumny BYTEA nie miały jeszcze
+            // realnych danych poza testowymi, więc ich zawartość nie jest migrowana.
+            "ALTER TABLE note ADD COLUMN IF NOT EXISTS content_path TEXT",
+            "ALTER TABLE note DROP COLUMN IF EXISTS pdf_path",
+            "ALTER TABLE note DROP COLUMN IF EXISTS content_blob",
+            "ALTER TABLE note DROP COLUMN IF EXISTS pdf_blob",
+            "ALTER TABLE note DROP COLUMN IF EXISTS content_json",
+            "ALTER TABLE note DROP COLUMN IF EXISTS prompt_version",
+            "ALTER TABLE note DROP COLUMN IF EXISTS ai_model",
+            "ALTER TABLE note DROP COLUMN IF EXISTS generated_at",
+
+            // Sprzątanie osieroconych notatek po skasowanym temacie (bez FK w starej bazie)
+            "DELETE FROM note WHERE topic_id NOT IN (SELECT id FROM topic)",
+
+            // Quiz w tej wersji aplikacji nie istnieje — feature bez UI, bez danych, do wycięcia.
+            "DROP TABLE IF EXISTS quiz_attempt",
+            "DROP TABLE IF EXISTS user_progress",
+            "DROP TABLE IF EXISTS quiz"
+    );
+
+    private Schema() {
+    }
+
+    public static void ensure(DataSource dataSource) {
+        try (Connection con = dataSource.getConnection()) {
+            migrateDifficultyToDetailLevel(con);
+            try (Statement stmt = con.createStatement()) {
+                for (String sql : STATEMENTS) {
+                    log.fine(() -> "Schema: executing -> " + sql.strip().replaceAll("\\s+", " "));
+                    stmt.executeUpdate(sql);
+                }
+            }
+            log.info("Schema check complete — tables ready.");
+        } catch (SQLException e) {
+            log.severe("Schema migration failed: " + e.getMessage());
+            throw new IllegalStateException("Failed to initialize database schema", e);
+        }
+    }
+
+    /**
+     * Jednorazowa migracja z poprzedniej wersji: topic.difficulty (BASIC/MEDIUM/HARD,
+     * "trudność treści") -> topic.detail_level (LOW/MEDIUM/HIGH, "poziom szczegółowości").
+     * Nie-op na świeżej bazie i na każdym kolejnym starcie po pierwszej migracji.
+     */
+    private static void migrateDifficultyToDetailLevel(Connection con) throws SQLException {
+        if (!columnExists(con, "topic", "difficulty")) {
+            return;
+        }
+        try (Statement stmt = con.createStatement()) {
+            stmt.executeUpdate("ALTER TABLE topic ADD COLUMN IF NOT EXISTS detail_level TEXT");
+            stmt.executeUpdate("""
+                    UPDATE topic SET detail_level = CASE difficulty
+                        WHEN 'BASIC' THEN 'LOW' WHEN 'MEDIUM' THEN 'MEDIUM' WHEN 'HARD' THEN 'HIGH' ELSE 'MEDIUM' END
+                    WHERE detail_level IS NULL
+                    """);
+            stmt.executeUpdate("ALTER TABLE topic ALTER COLUMN detail_level SET NOT NULL");
+            stmt.executeUpdate("ALTER TABLE topic DROP CONSTRAINT IF EXISTS topic_difficulty_check");
+            stmt.executeUpdate("ALTER TABLE topic DROP COLUMN difficulty");
+            log.info("Migrated topic.difficulty -> topic.detail_level");
+        }
+    }
+
+    private static boolean columnExists(Connection con, String table, String column) throws SQLException {
+        String sql = "SELECT 1 FROM information_schema.columns WHERE table_name = ? AND column_name = ?";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, table);
+            ps.setString(2, column);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/dao/CategoryDao.java =====
+
+package com.example.knowledgeforge.dao;
+
+import com.example.knowledgeforge.domain.category.CategoryNode;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+public class CategoryDao {
+
+    private final DataSource dataSource;
+
+    public CategoryDao(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+
+    public Optional<CategoryNode> findByIdAndUserId(UUID id, Long userId) {
+        String sql = "SELECT * FROM category_node WHERE id = ? AND user_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, id);
+            ps.setLong(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query category by id", e);
+        }
+    }
+
+    public List<CategoryNode> findAllByUserId(Long userId) {
+        String sql = "SELECT * FROM category_node WHERE user_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<CategoryNode> result = new ArrayList<>();
+                while (rs.next()) result.add(map(rs));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list categories", e);
+        }
+    }
+
+    public Optional<CategoryNode> findByUserIdAndRootTrue(Long userId) {
+        String sql = "SELECT * FROM category_node WHERE user_id = ? AND root = TRUE";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query root category", e);
+        }
+    }
+
+    public boolean existsByParentId(UUID parentId) {
+        String sql = "SELECT 1 FROM category_node WHERE parent_id = ? LIMIT 1";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, parentId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check for sub-categories", e);
+        }
+    }
+
+    public long countByUserIdAndParentIdAndNameIgnoreCase(Long userId, UUID parentId, String name) {
+        String sql = "SELECT COUNT(*) FROM category_node WHERE user_id = ? AND parent_id = ? AND lower(name) = lower(?)";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setObject(2, parentId);
+            ps.setString(3, name);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count sibling categories", e);
+        }
+    }
+
+    public CategoryNode insert(CategoryNode node) {
+        if (node.getId() == null) node.setId(UUID.randomUUID());
+        Instant now = Instant.now();
+        node.setCreatedAt(now);
+        node.setUpdatedAt(now);
+
+        String sql = """
+                INSERT INTO category_node (id, user_id, parent_id, name, position, root, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, node.getId());
+            ps.setLong(2, node.getUserId());
+            ps.setObject(3, node.getParentId());
+            ps.setString(4, node.getName());
+            ps.setInt(5, node.getPosition());
+            ps.setBoolean(6, node.isRoot());
+            ps.setTimestamp(7, Timestamp.from(node.getCreatedAt()));
+            ps.setTimestamp(8, Timestamp.from(node.getUpdatedAt()));
+            ps.executeUpdate();
+            return node;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to insert category", e);
+        }
+    }
+
+    public CategoryNode update(CategoryNode node) {
+        node.setUpdatedAt(Instant.now());
+        String sql = "UPDATE category_node SET name = ?, position = ?, updated_at = ? WHERE id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, node.getName());
+            ps.setInt(2, node.getPosition());
+            ps.setTimestamp(3, Timestamp.from(node.getUpdatedAt()));
+            ps.setObject(4, node.getId());
+            ps.executeUpdate();
+            return node;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update category", e);
+        }
+    }
+
+    public void delete(UUID id) {
+        String sql = "DELETE FROM category_node WHERE id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to delete category", e);
+        }
+    }
+
+    private CategoryNode map(ResultSet rs) throws SQLException {
+        CategoryNode node = new CategoryNode();
+        node.setId(rs.getObject("id", UUID.class));
+        node.setUserId(rs.getLong("user_id"));
+        node.setParentId(rs.getObject("parent_id", UUID.class));
+        node.setName(rs.getString("name"));
+        node.setPosition(rs.getInt("position"));
+        node.setRoot(rs.getBoolean("root"));
+        node.setCreatedAt(rs.getTimestamp("created_at").toInstant());
+        node.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
+        return node;
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/dao/NoteDao.java =====
+
+package com.example.knowledgeforge.dao;
+
+import com.example.knowledgeforge.domain.note.Note;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Baza trzyma tylko ścieżkę do pliku treści (content_path) — sama zawartość
+ * .kfdoc leży na dysku, zob. storage.NoteFileStorage.
+ */
+public class NoteDao {
+
+    private final DataSource dataSource;
+
+    public NoteDao(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+
+    public Optional<Note> findByTopicId(UUID topicId) {
+        String sql = "SELECT * FROM note WHERE topic_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, topicId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query note by topic", e);
+        }
+    }
+
+    public Optional<Note> findByTopicIdAndUserId(UUID topicId, Long userId) {
+        String sql = "SELECT * FROM note WHERE topic_id = ? AND user_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, topicId);
+            ps.setLong(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query note by topic and user", e);
+        }
+    }
+
+    /** Wszystkie notatki użytkownika — używane przez wyszukiwarkę (przeszukuje treść). */
+    public List<Note> findAllByUserId(Long userId) {
+        String sql = "SELECT * FROM note WHERE user_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Note> result = new ArrayList<>();
+                while (rs.next()) result.add(map(rs));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list notes by user", e);
+        }
+    }
+
+    public Note insert(Note note) {
+        if (note.getId() == null) note.setId(UUID.randomUUID());
+        // createdAt bywa ustawiany z wyprzedzeniem przez NoteService (żeby dokładnie ten sam
+        // znacznik czasu trafił też do metadanych w pliku .kfdoc) — tu tylko domyślamy, gdy brak.
+        if (note.getCreatedAt() == null) note.setCreatedAt(Instant.now());
+        note.setUpdatedAt(Instant.now());
+        if (note.getVersion() == null) note.setVersion(1);
+
+        String sql = """
+                INSERT INTO note (id, user_id, topic_id, content_path, version, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, note.getId());
+            ps.setLong(2, note.getUserId());
+            ps.setObject(3, note.getTopicId());
+            ps.setString(4, note.getContentPath());
+            ps.setInt(5, note.getVersion());
+            ps.setTimestamp(6, Timestamp.from(note.getCreatedAt()));
+            ps.setTimestamp(7, Timestamp.from(note.getUpdatedAt()));
+            ps.executeUpdate();
+            return note;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to insert note", e);
+        }
+    }
+
+    public Note update(Note note) {
+        note.setUpdatedAt(Instant.now());
+        String sql = "UPDATE note SET content_path = ?, version = ?, updated_at = ? WHERE id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, note.getContentPath());
+            ps.setInt(2, note.getVersion());
+            ps.setTimestamp(3, Timestamp.from(note.getUpdatedAt()));
+            ps.setObject(4, note.getId());
+            ps.executeUpdate();
+            return note;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update note", e);
+        }
+    }
+
+    private Note map(ResultSet rs) throws SQLException {
+        Note note = new Note();
+        note.setId(rs.getObject("id", UUID.class));
+        note.setUserId(rs.getLong("user_id"));
+        note.setTopicId(rs.getObject("topic_id", UUID.class));
+        note.setContentPath(rs.getString("content_path"));
+        note.setVersion(rs.getInt("version"));
+        note.setCreatedAt(rs.getTimestamp("created_at").toInstant());
+        note.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
+        return note;
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/dao/TopicDao.java =====
+
+package com.example.knowledgeforge.dao;
+
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.Topic;
+import com.example.knowledgeforge.domain.topic.TopicStatus;
+import com.example.knowledgeforge.domain.topic.TopicType;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+public class TopicDao {
+
+    private static final Logger log = Logger.getLogger(TopicDao.class.getName());
+
+    private final DataSource dataSource;
+
+    public TopicDao(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+
+    public Optional<Topic> findByIdAndUserId(UUID id, Long userId) {
+        String sql = "SELECT * FROM topic WHERE id = ? AND user_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, id);
+            ps.setLong(2, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query topic by id", e);
+        }
+    }
+
+    /** Wszystkie tematy/wpisy użytkownika, niezależnie od kategorii — używane przez wyszukiwarkę. */
+    public List<Topic> findAllByUserId(Long userId) {
+        String sql = "SELECT * FROM topic WHERE user_id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Topic> result = new ArrayList<>();
+                while (rs.next()) result.add(map(rs));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list all topics by user", e);
+        }
+    }
+
+    public List<Topic> findAllByUserIdAndCategoryIdOrderByCreatedAtDesc(Long userId, UUID categoryId) {
+        String sql = "SELECT * FROM topic WHERE user_id = ? AND category_id = ? ORDER BY created_at DESC";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setObject(2, categoryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Topic> result = new ArrayList<>();
+                while (rs.next()) result.add(map(rs));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list topics by category", e);
+        }
+    }
+
+    /** Liczba tematów na kategorię (bezpośrednio w niej, bez podkategorii) — do cyferki w drzewie. */
+    public Map<UUID, Integer> countByCategoryForUser(Long userId) {
+        String sql = "SELECT category_id, COUNT(*) AS cnt FROM topic WHERE user_id = ? GROUP BY category_id";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                Map<UUID, Integer> result = new HashMap<>();
+                while (rs.next()) {
+                    result.put(rs.getObject("category_id", UUID.class), rs.getInt("cnt"));
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count topics by category", e);
+        }
+    }
+
+    /** Liczba tematów niskiego poziomu szczegółowości na kategorię (bezpośrednio w niej, bez podkategorii) —
+     *  te tematy są domyślnie ukryte w drzewie, więc licznik w UI musi je umieć odjąć od sumy. */
+    public Map<UUID, Integer> countLowDetailByCategoryForUser(Long userId) {
+        String sql = "SELECT category_id, COUNT(*) AS cnt FROM topic WHERE user_id = ? AND detail_level = 'LOW' GROUP BY category_id";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                Map<UUID, Integer> result = new HashMap<>();
+                while (rs.next()) {
+                    result.put(rs.getObject("category_id", UUID.class), rs.getInt("cnt"));
+                }
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count low-detail topics by category", e);
+        }
+    }
+
+    /** Autorzy użyci choć raz — do rozwijanej listy w filtrach. Autor dziś jest ręczny placeholder;
+     *  docelowo będzie zczytywany z tokena, ale zapytanie już ma sens niezależnie od tego. */
+    public List<String> findDistinctAuthors(Long userId) {
+        String sql = "SELECT DISTINCT author FROM topic WHERE user_id = ? AND author IS NOT NULL AND author <> '' ORDER BY author";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<String> result = new ArrayList<>();
+                while (rs.next()) result.add(rs.getString("author"));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list distinct authors", e);
+        }
+    }
+
+    public boolean existsByUserIdAndCategoryId(Long userId, UUID categoryId) {
+        String sql = "SELECT 1 FROM topic WHERE user_id = ? AND category_id = ? LIMIT 1";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setObject(2, categoryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to check topics in category", e);
+        }
+    }
+
+    public Topic insert(Topic topic) {
+        if (topic.getId() == null) topic.setId(UUID.randomUUID());
+        Instant now = Instant.now();
+        topic.setCreatedAt(now);
+        topic.setUpdatedAt(now);
+        if (topic.getStatus() == null) topic.setStatus(TopicStatus.NEW);
+
+        String sql = """
+                INSERT INTO topic (id, user_id, category_id, title, short_prompt, author, detail_level, type, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, topic.getId());
+            ps.setLong(2, topic.getUserId());
+            ps.setObject(3, topic.getCategoryId());
+            ps.setString(4, topic.getTitle());
+            ps.setString(5, topic.getShortPrompt());
+            ps.setString(6, topic.getAuthor());
+            ps.setString(7, topic.getDetailLevel().name());
+            ps.setString(8, topic.getType().name());
+            ps.setString(9, topic.getStatus().name());
+            ps.setTimestamp(10, Timestamp.from(topic.getCreatedAt()));
+            ps.setTimestamp(11, Timestamp.from(topic.getUpdatedAt()));
+            ps.executeUpdate();
+            log.fine(() -> "Inserted topic " + topic.getId());
+            return topic;
+        } catch (SQLException e) {
+            log.log(Level.SEVERE, "Failed to insert topic " + topic.getId(), e);
+            throw new RuntimeException("Failed to insert topic", e);
+        }
+    }
+
+    public Topic update(Topic topic) {
+        topic.setUpdatedAt(Instant.now());
+        String sql = """
+                UPDATE topic SET title = ?, short_prompt = ?, author = ?, detail_level = ?, type = ?, status = ?, updated_at = ?
+                WHERE id = ?
+                """;
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, topic.getTitle());
+            ps.setString(2, topic.getShortPrompt());
+            ps.setString(3, topic.getAuthor());
+            ps.setString(4, topic.getDetailLevel().name());
+            ps.setString(5, topic.getType().name());
+            ps.setString(6, topic.getStatus().name());
+            ps.setTimestamp(7, Timestamp.from(topic.getUpdatedAt()));
+            ps.setObject(8, topic.getId());
+            ps.executeUpdate();
+            log.fine(() -> "Updated topic " + topic.getId());
+            return topic;
+        } catch (SQLException e) {
+            log.log(Level.SEVERE, "Failed to update topic " + topic.getId(), e);
+            throw new RuntimeException("Failed to update topic", e);
+        }
+    }
+
+    public void delete(UUID id) {
+        String sql = "DELETE FROM topic WHERE id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setObject(1, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to delete topic", e);
+        }
+    }
+
+    private Topic map(ResultSet rs) throws SQLException {
+        Topic topic = new Topic();
+        topic.setId(rs.getObject("id", UUID.class));
+        topic.setUserId(rs.getLong("user_id"));
+        topic.setCategoryId(rs.getObject("category_id", UUID.class));
+        topic.setTitle(rs.getString("title"));
+        topic.setShortPrompt(rs.getString("short_prompt"));
+        topic.setAuthor(rs.getString("author"));
+        topic.setDetailLevel(DetailLevel.valueOf(rs.getString("detail_level")));
+        topic.setType(TopicType.valueOf(rs.getString("type")));
+        topic.setStatus(TopicStatus.valueOf(rs.getString("status")));
+        topic.setCreatedAt(rs.getTimestamp("created_at").toInstant());
+        topic.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
+        return topic;
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/dao/UserDao.java =====
+
+package com.example.knowledgeforge.dao;
+
+import com.example.knowledgeforge.domain.user.User;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.Optional;
+
+public class UserDao {
+
+    private final DataSource dataSource;
+
+    public UserDao(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+
+    public Optional<User> findByUsername(String username) {
+        String sql = "SELECT id, username, email, active FROM users WHERE username = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query user by username", e);
+        }
+    }
+
+    public Optional<User> findById(Long id) {
+        String sql = "SELECT id, username, email, active FROM users WHERE id = ?";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, id);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? Optional.of(map(rs)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query user by id", e);
+        }
+    }
+
+    public User insert(User user) {
+        String sql = "INSERT INTO users (username, email, active) VALUES (?, ?, ?)";
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, user.getUsername());
+            ps.setString(2, user.getEmail());
+            ps.setBoolean(3, user.isActive());
+            ps.executeUpdate();
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                if (keys.next()) {
+                    user.setId(keys.getLong(1));
+                }
+            }
+            return user;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to insert user", e);
+        }
+    }
+
+    private User map(ResultSet rs) throws SQLException {
+        return new User(
+                rs.getLong("id"),
+                rs.getString("username"),
+                rs.getString("email"),
+                rs.getBoolean("active")
+        );
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/document/DocumentContainer.java =====
+
+package com.example.knowledgeforge.document;
+
+import com.example.knowledgeforge.json.JsonMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
+
+/**
+ * ".kfdoc" — własny, prosty format binarny dla treści notatek/instrukcji.
+ * To zwykły ZIP (java.util.zip, biblioteka standardowa — zero zależności),
+ * dokładnie ten sam pomysł co .docx/.odt:
+ *
+ *   manifest.json     — {"format":"kfdoc","version":1,"metadata":{...}}
+ *   content.json      — drzewo dokumentu edytora (ProseMirror/TipTap JSON)
+ *   assets/&lt;id&gt;.png  — wklejone obrazki, referencjonowane z content.json
+ *                        przez "asset:&lt;id&gt;.png" zamiast base64 w środku drzewa
+ *
+ * "metadata" w manifeście to jawne pola z encji (tytuł, autor, kategoria,
+ * poziom szczegółowości, daty utworzenia...) — plik na dysku jest więc
+ * samodzielną sumą metadanych + treści, a nie tylko surowym contentem.
+ * Dzięki temu, że to zwykły ZIP z czytelnym JSON-em w środku, każdy plik
+ * .kfdoc da się otworzyć i odczytać poza aplikacją zwykłym, ogólnodostępnym
+ * archiwizatorem (Eksplorator Windows, 7-Zip, `unzip`...) — bez żadnego
+ * własnego narzędzia do deszyfrowania.
+ *
+ * Całość trzymana jest jako jeden plik na dysku, zob. storage.NoteFileStorage.
+ */
+public final class DocumentContainer {
+
+    private static final String MANIFEST_ENTRY = "manifest.json";
+    private static final String CONTENT_ENTRY = "content.json";
+    private static final String ASSET_PREFIX = "assets/";
+    public static final String ASSET_SCHEME = "asset:";
+
+    private final JsonNode contentJson;
+    private final Map<String, byte[]> assets;
+    private final Map<String, Object> metadata;
+
+    private DocumentContainer(JsonNode contentJson, Map<String, byte[]> assets, Map<String, Object> metadata) {
+        this.contentJson = contentJson;
+        this.assets = assets;
+        this.metadata = metadata;
+    }
+
+    public static DocumentContainer of(JsonNode contentJson, Map<String, byte[]> assets) {
+        return new DocumentContainer(contentJson, assets, Map.of());
+    }
+
+    /** metadata — jawne pola z encji Topic/Note, dopisywane do manifestu obok treści. */
+    public static DocumentContainer of(JsonNode contentJson, Map<String, byte[]> assets, Map<String, Object> metadata) {
+        return new DocumentContainer(contentJson, assets, metadata);
+    }
+
+    public static DocumentContainer empty() {
+        return new DocumentContainer(JsonMapper.get().createObjectNode(), Map.of(), Map.of());
+    }
+
+    public JsonNode contentJson() {
+        return contentJson;
+    }
+
+    public byte[] asset(String filename) {
+        return assets.get(filename);
+    }
+
+    /** Metadane odczytane z manifestu (pusta mapa, jeśli plik ich nie zawierał — starszy zapis). */
+    public Map<String, Object> metadata() {
+        return metadata;
+    }
+
+    public byte[] toBytes() {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try (ZipOutputStream zip = new ZipOutputStream(baos)) {
+                Map<String, Object> manifest = new HashMap<>();
+                manifest.put("format", "kfdoc");
+                manifest.put("version", 1);
+                manifest.put("metadata", metadata);
+                putEntry(zip, MANIFEST_ENTRY, JsonMapper.get().writerWithDefaultPrettyPrinter().writeValueAsBytes(manifest));
+                putEntry(zip, CONTENT_ENTRY, JsonMapper.get().writeValueAsBytes(contentJson));
+                for (Map.Entry<String, byte[]> asset : assets.entrySet()) {
+                    putEntry(zip, ASSET_PREFIX + asset.getKey(), asset.getValue());
+                }
+            }
+            return baos.toByteArray();
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to build .kfdoc container", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static DocumentContainer fromBytes(byte[] zipBytes) {
+        if (zipBytes == null || zipBytes.length == 0) return empty();
+
+        JsonNode content = JsonMapper.get().createObjectNode();
+        Map<String, byte[]> assets = new HashMap<>();
+        Map<String, Object> metadata = Map.of();
+        try (ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                byte[] data = zin.readAllBytes();
+                if (entry.getName().equals(CONTENT_ENTRY)) {
+                    content = JsonMapper.get().readTree(data);
+                } else if (entry.getName().equals(MANIFEST_ENTRY)) {
+                    Map<String, Object> manifest = JsonMapper.get().readValue(data, Map.class);
+                    Object m = manifest.get("metadata");
+                    if (m instanceof Map) {
+                        metadata = (Map<String, Object>) m;
+                    }
+                } else if (entry.getName().startsWith(ASSET_PREFIX)) {
+                    assets.put(entry.getName().substring(ASSET_PREFIX.length()), data);
+                }
+                zin.closeEntry();
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read .kfdoc container", e);
+        }
+        return new DocumentContainer(content, assets, metadata);
+    }
+
+    /**
+     * Podmienia w miejscu wartości "src" węzłów obrazków (type == "image")
+     * zaczynające się od {@link #ASSET_SCHEME} — używane przy odczycie, żeby
+     * zamienić "asset:xyz.png" na realny, serwowalny URL.
+     */
+    public static void rewriteImageSrc(JsonNode node, Function<String, String> rewriter) {
+        if (node == null) return;
+        if (node.isObject()) {
+            ObjectNode obj = (ObjectNode) node;
+            if ("image".equals(textOrNull(obj.get("type")))) {
+                JsonNode attrs = obj.get("attrs");
+                if (attrs != null && attrs.isObject()) {
+                    ObjectNode attrsObj = (ObjectNode) attrs;
+                    String src = textOrNull(attrsObj.get("src"));
+                    if (src != null && src.startsWith(ASSET_SCHEME)) {
+                        attrsObj.put("src", rewriter.apply(src.substring(ASSET_SCHEME.length())));
+                    }
+                }
+            }
+            obj.fields().forEachRemaining(e -> rewriteImageSrc(e.getValue(), rewriter));
+        } else if (node.isArray()) {
+            node.forEach(child -> rewriteImageSrc(child, rewriter));
+        }
+    }
+
+    /** Cały tekst dokumentu jako jeden ciąg (węzły "text" połączone spacją) — do wyszukiwarki. */
+    public String extractPlainText() {
+        StringBuilder sb = new StringBuilder();
+        collectText(contentJson, sb);
+        return sb.toString();
+    }
+
+    private static void collectText(JsonNode node, StringBuilder sb) {
+        if (node == null) return;
+        if (node.isObject()) {
+            if ("text".equals(textOrNull(node.get("type")))) {
+                String text = textOrNull(node.get("text"));
+                if (text != null) {
+                    if (sb.length() > 0) sb.append(' ');
+                    sb.append(text);
+                }
+            }
+            node.fields().forEachRemaining(e -> collectText(e.getValue(), sb));
+        } else if (node.isArray()) {
+            node.forEach(child -> collectText(child, sb));
+        }
+    }
+
+    private static String textOrNull(JsonNode n) {
+        return n != null && n.isTextual() ? n.asText() : null;
+    }
+
+    private static void putEntry(ZipOutputStream zip, String name, byte[] data) throws IOException {
+        zip.putNextEntry(new ZipEntry(name));
+        zip.write(data);
+        zip.closeEntry();
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/category/CategoryNode.java =====
+
+package com.example.knowledgeforge.domain.category;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class CategoryNode {
+
+    private UUID id;
+    private Long userId;
+    private UUID parentId;
+    private String name;
+    private Integer position = 0;
+    private boolean root;
+    private Instant createdAt;
+    private Instant updatedAt;
+
+    public CategoryNode() {
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+
+    public UUID getParentId() { return parentId; }
+    public void setParentId(UUID parentId) { this.parentId = parentId; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public Integer getPosition() { return position; }
+    public void setPosition(Integer position) { this.position = position; }
+
+    public boolean isRoot() { return root; }
+    public void setRoot(boolean root) { this.root = root; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/category/dto/CategoryDto.java =====
+
+package com.example.knowledgeforge.domain.category.dto;
+
+import com.example.knowledgeforge.domain.category.CategoryNode;
+
+import java.util.UUID;
+
+public class CategoryDto {
+
+    private UUID id;
+    private String name;
+    private UUID parentId;
+    private Integer position;
+    private boolean root;
+
+    public CategoryDto() {
+    }
+
+    public CategoryDto(UUID id, String name, UUID parentId, Integer position, boolean root) {
+        this.id = id;
+        this.name = name;
+        this.parentId = parentId;
+        this.position = position;
+        this.root = root;
+    }
+
+    public static CategoryDto from(CategoryNode node) {
+        return new CategoryDto(
+                node.getId(), node.getName(), node.getParentId(), node.getPosition(), node.isRoot()
+        );
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public UUID getParentId() { return parentId; }
+    public void setParentId(UUID parentId) { this.parentId = parentId; }
+
+    public Integer getPosition() { return position; }
+    public void setPosition(Integer position) { this.position = position; }
+
+    public boolean isRoot() { return root; }
+    public void setRoot(boolean root) { this.root = root; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/category/dto/CategoryTreeDto.java =====
+
+package com.example.knowledgeforge.domain.category.dto;
+
+import com.example.knowledgeforge.domain.category.CategoryNode;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+public class CategoryTreeDto {
+
+    private UUID id;
+    private String name;
+    private List<CategoryTreeDto> children;
+    /** Suma tematów w tej kategorii ORAZ we wszystkich jej podkategoriach (rekurencyjnie).
+     *  Cyferka w UI wyświetla to tylko na kategoriach głównych (depth 0) — podkategorie jej nie pokazują. */
+    private int topicCount;
+    /** Z powyższej sumy — ile ma niski poziom szczegółowości (domyślnie ukryte w drzewie jako "do uzupełnienia"). */
+    private int lowDetailCount;
+
+    public CategoryTreeDto() {
+    }
+
+    public CategoryTreeDto(UUID id, String name, List<CategoryTreeDto> children, int topicCount, int lowDetailCount) {
+        this.id = id;
+        this.name = name;
+        this.children = children;
+        this.topicCount = topicCount;
+        this.lowDetailCount = lowDetailCount;
+    }
+
+    public static CategoryTreeDto fromRoot(CategoryNode root, Map<UUID, List<CategoryNode>> byParent,
+                                            Map<UUID, Integer> directTopicCounts, Map<UUID, Integer> directLowDetailCounts) {
+        List<CategoryNode> directChildren = byParent.getOrDefault(root.getId(), List.of());
+        List<CategoryTreeDto> childDtos = directChildren.stream()
+                .filter(node -> !node.isRoot())
+                .map(node -> fromRoot(node, byParent, directTopicCounts, directLowDetailCounts))
+                .collect(Collectors.toList());
+
+        int ownCount = directTopicCounts.getOrDefault(root.getId(), 0);
+        int totalCount = ownCount + childDtos.stream().mapToInt(CategoryTreeDto::getTopicCount).sum();
+
+        int ownLowCount = directLowDetailCounts.getOrDefault(root.getId(), 0);
+        int totalLowCount = ownLowCount + childDtos.stream().mapToInt(CategoryTreeDto::getLowDetailCount).sum();
+
+        return new CategoryTreeDto(root.getId(), root.getName(), childDtos, totalCount, totalLowCount);
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public List<CategoryTreeDto> getChildren() { return children; }
+    public void setChildren(List<CategoryTreeDto> children) { this.children = children; }
+
+    public int getTopicCount() { return topicCount; }
+    public void setTopicCount(int topicCount) { this.topicCount = topicCount; }
+
+    public int getLowDetailCount() { return lowDetailCount; }
+    public void setLowDetailCount(int lowDetailCount) { this.lowDetailCount = lowDetailCount; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/category/dto/CreateCategoryRequest.java =====
+
+package com.example.knowledgeforge.domain.category.dto;
+
+import java.util.UUID;
+
+public record CreateCategoryRequest(
+        String name,
+        UUID parentId
+) {
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/category/dto/UpdateCategoryRequest.java =====
+
+package com.example.knowledgeforge.domain.category.dto;
+
+public record UpdateCategoryRequest(
+        String name
+) {
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/CategoryNotFoundException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+public class CategoryNotFoundException extends NotFoundException {
+    public CategoryNotFoundException(String id) {
+        super("Category not found: " + id);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/ConflictException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+public class ConflictException extends RuntimeException {
+    public ConflictException(String message) {
+        super(message);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/ForbiddenException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+public class ForbiddenException extends RuntimeException {
+    public ForbiddenException(String message) {
+        super(message);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/NotFoundException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+public class NotFoundException extends RuntimeException {
+    public NotFoundException(String message) {
+        super(message);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/NoteNotFoundException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+public class NoteNotFoundException extends NotFoundException {
+    public NoteNotFoundException(String topicId) {
+        super("Note not found for topic: " + topicId);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/TopicNotFoundException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+public class TopicNotFoundException extends NotFoundException {
+    public TopicNotFoundException(String id) {
+        super("Topic not found: " + id);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/exception/ValidationException.java =====
+
+package com.example.knowledgeforge.domain.exception;
+
+/**
+ * Zastępuje adnotacje jakarta.validation (@NotBlank, @NotNull, ...) —
+ * bez frameworka walidacja jest ręczna, w serwisach; ten wyjątek
+ * mapuje się na HTTP 400, tak jak wcześniej MethodArgumentNotValidException.
+ */
+public class ValidationException extends RuntimeException {
+    public ValidationException(String message) {
+        super(message);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/note/Note.java =====
+
+package com.example.knowledgeforge.domain.note;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class Note {
+
+    private UUID id;
+    private Long userId;
+    private UUID topicId;
+    /** Ścieżka na dysku do pliku .kfdoc (treść edytora + wklejone obrazki). Baza trzyma tylko tę ścieżkę. */
+    private String contentPath;
+    private Integer version = 1;
+    private Instant createdAt;
+    private Instant updatedAt;
+
+    public Note() {
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+
+    public UUID getTopicId() { return topicId; }
+    public void setTopicId(UUID topicId) { this.topicId = topicId; }
+
+    public String getContentPath() { return contentPath; }
+    public void setContentPath(String contentPath) { this.contentPath = contentPath; }
+
+    public Integer getVersion() { return version; }
+    public void setVersion(Integer version) { this.version = version; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/note/dto/NoteDto.java =====
+
+package com.example.knowledgeforge.domain.note.dto;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class NoteDto {
+
+    private UUID id;
+    private UUID topicId;
+    /** Drzewo dokumentu edytora, z odnośnikami do obrazków przepisanymi na realne URL-e. */
+    private JsonNode contentJson;
+    private Integer version;
+    /** Ustawiana raz, przy pierwszym zapisie — nie zmienia się przy kolejnych edycjach. */
+    private Instant createdAt;
+    private Instant updatedAt;
+
+    public NoteDto() {
+    }
+
+    public NoteDto(UUID id, UUID topicId, JsonNode contentJson, Integer version, Instant createdAt, Instant updatedAt) {
+        this.id = id;
+        this.topicId = topicId;
+        this.contentJson = contentJson;
+        this.version = version;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public UUID getTopicId() { return topicId; }
+    public void setTopicId(UUID topicId) { this.topicId = topicId; }
+
+    public JsonNode getContentJson() { return contentJson; }
+    public void setContentJson(JsonNode contentJson) { this.contentJson = contentJson; }
+
+    public Integer getVersion() { return version; }
+    public void setVersion(Integer version) { this.version = version; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/note/dto/SaveNoteRequest.java =====
+
+package com.example.knowledgeforge.domain.note.dto;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.util.List;
+
+/**
+ * Payload zapisu notatki wysyłany przez edytor: drzewo dokumentu (obrazki
+ * odnoszą się do assetów przez "asset:&lt;id&gt;") i same assety w base64.
+ * PDF nie jest tu w ogóle — generuje się on-demand w przeglądarce, dopiero
+ * gdy ktoś naprawdę kliknie "Pobierz PDF", zamiast puchnąć na dysku przy
+ * każdym zapisie każdej notatki.
+ */
+public record SaveNoteRequest(
+        JsonNode contentJson,
+        List<AssetPayload> assets
+) {
+    public record AssetPayload(String id, String mimeType, String dataBase64) {
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/search/SearchResultDto.java =====
+
+package com.example.knowledgeforge.domain.search;
+
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.TopicType;
+
+import java.util.UUID;
+
+public record SearchResultDto(
+        UUID topicId,
+        UUID categoryId,
+        String title,
+        TopicType type,
+        DetailLevel detailLevel,
+        String matchedIn, // "TITLE" | "DESCRIPTION" | "CONTENT"
+        String snippet
+) {
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/DetailLevel.java =====
+
+package com.example.knowledgeforge.domain.topic;
+
+/**
+ * Poziom szczegółowości wpisu — nie "trudność treści", tylko to, jak
+ * dopracowana jest notatka:
+ *  LOW    — szkic, temat zanotowany i zaplanowany do uzupełnienia później
+ *  MEDIUM — notatka robocza, spisana szybko, czytelna głównie dla autora
+ *  HIGH   — notatka dopracowana, napisana tak, by zrozumiał ją każdy
+ */
+public enum DetailLevel {
+    LOW, MEDIUM, HIGH
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/Topic.java =====
+
+package com.example.knowledgeforge.domain.topic;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class Topic {
+
+    private UUID id;
+    private Long userId;
+    private UUID categoryId;
+    private String title;
+    private String shortPrompt;
+    private String author;
+    private DetailLevel detailLevel;
+    private TopicType type;
+    private TopicStatus status = TopicStatus.NEW;
+    private Instant createdAt;
+    private Instant updatedAt;
+
+    public Topic() {
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+
+    public UUID getCategoryId() { return categoryId; }
+    public void setCategoryId(UUID categoryId) { this.categoryId = categoryId; }
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+
+    public String getShortPrompt() { return shortPrompt; }
+    public void setShortPrompt(String shortPrompt) { this.shortPrompt = shortPrompt; }
+
+    public String getAuthor() { return author; }
+    public void setAuthor(String author) { this.author = author; }
+
+    public DetailLevel getDetailLevel() { return detailLevel; }
+    public void setDetailLevel(DetailLevel detailLevel) { this.detailLevel = detailLevel; }
+
+    public TopicType getType() { return type; }
+    public void setType(TopicType type) { this.type = type; }
+
+    public TopicStatus getStatus() { return status; }
+    public void setStatus(TopicStatus status) { this.status = status; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/TopicStatus.java =====
+
+package com.example.knowledgeforge.domain.topic;
+
+/** Bez ścieżki quizowej — wpis albo jest pusty, albo ma już treść. */
+public enum TopicStatus {
+    NEW, NOTE_ADDED
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/TopicType.java =====
+
+package com.example.knowledgeforge.domain.topic;
+
+public enum TopicType {
+    INSTRUCTION, NOTE
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/dto/CreateTopicRequest.java =====
+
+package com.example.knowledgeforge.domain.topic.dto;
+
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.TopicType;
+
+import java.util.UUID;
+
+public record CreateTopicRequest(
+        UUID categoryId,
+        String title,
+        String shortPrompt,
+        String author,
+        DetailLevel detailLevel,
+        TopicType type
+) {
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/dto/TopicDto.java =====
+
+package com.example.knowledgeforge.domain.topic.dto;
+
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.Topic;
+import com.example.knowledgeforge.domain.topic.TopicStatus;
+import com.example.knowledgeforge.domain.topic.TopicType;
+
+import java.time.Instant;
+import java.util.UUID;
+
+public class TopicDto {
+
+    private UUID id;
+    private Long userId;
+    private UUID categoryId;
+    private String title;
+    private String shortPrompt;
+    private String author;
+    private DetailLevel detailLevel;
+    private TopicType type;
+    private TopicStatus status;
+    private Instant createdAt;
+    private Instant updatedAt;
+
+    public TopicDto() {
+    }
+
+    public TopicDto(UUID id, Long userId, UUID categoryId, String title, String shortPrompt, String author,
+                    DetailLevel detailLevel, TopicType type, TopicStatus status,
+                    Instant createdAt, Instant updatedAt) {
+        this.id = id;
+        this.userId = userId;
+        this.categoryId = categoryId;
+        this.title = title;
+        this.shortPrompt = shortPrompt;
+        this.author = author;
+        this.detailLevel = detailLevel;
+        this.type = type;
+        this.status = status;
+        this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
+    }
+
+    public static TopicDto from(Topic t) {
+        return new TopicDto(
+                t.getId(), t.getUserId(), t.getCategoryId(), t.getTitle(), t.getShortPrompt(), t.getAuthor(),
+                t.getDetailLevel(), t.getType(), t.getStatus(), t.getCreatedAt(), t.getUpdatedAt()
+        );
+    }
+
+    public UUID getId() { return id; }
+    public void setId(UUID id) { this.id = id; }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+
+    public UUID getCategoryId() { return categoryId; }
+    public void setCategoryId(UUID categoryId) { this.categoryId = categoryId; }
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+
+    public String getShortPrompt() { return shortPrompt; }
+    public void setShortPrompt(String shortPrompt) { this.shortPrompt = shortPrompt; }
+
+    public String getAuthor() { return author; }
+    public void setAuthor(String author) { this.author = author; }
+
+    public DetailLevel getDetailLevel() { return detailLevel; }
+    public void setDetailLevel(DetailLevel detailLevel) { this.detailLevel = detailLevel; }
+
+    public TopicType getType() { return type; }
+    public void setType(TopicType type) { this.type = type; }
+
+    public TopicStatus getStatus() { return status; }
+    public void setStatus(TopicStatus status) { this.status = status; }
+
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/topic/dto/UpdateTopicRequest.java =====
+
+package com.example.knowledgeforge.domain.topic.dto;
+
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.TopicType;
+
+public record UpdateTopicRequest(
+        String title,
+        String shortPrompt,
+        String author,
+        DetailLevel detailLevel,
+        TopicType type
+) {
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/domain/user/User.java =====
+
+package com.example.knowledgeforge.domain.user;
+
+public class User {
+
+    private Long id;
+    private String username;
+    private String email;
+    private boolean active;
+
+    public User() {
+    }
+
+    public User(Long id, String username, String email, boolean active) {
+        this.id = id;
+        this.username = username;
+        this.email = email;
+        this.active = active;
+    }
+
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+
+    public String getUsername() { return username; }
+    public void setUsername(String username) { this.username = username; }
+
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
+
+    public boolean isActive() { return active; }
+    public void setActive(boolean active) { this.active = active; }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/json/JsonMapper.java =====
+
+package com.example.knowledgeforge.json;
+
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+
+/**
+ * Jedna, współdzielona instancja Jacksona dla całej aplikacji — używana
+ * zarówno przez serwlety (ciało żądania/odpowiedzi HTTP) jak i DAO
+ * (kolumny *_json w bazie). Jackson to biblioteka (de)serializacji,
+ * nie framework — nie zarządza cyklem życia obiektów.
+ */
+public final class JsonMapper {
+
+    private static final ObjectMapper INSTANCE = build();
+
+    private JsonMapper() {
+    }
+
+    public static ObjectMapper get() {
+        return INSTANCE;
+    }
+
+    private static ObjectMapper build() {
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.registerModule(new JavaTimeModule());
+        mapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        mapper.disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        return mapper;
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/service/CategoryService.java =====
+
+package com.example.knowledgeforge.service;
+
+import com.example.knowledgeforge.dao.CategoryDao;
+import com.example.knowledgeforge.dao.TopicDao;
+import com.example.knowledgeforge.domain.category.CategoryNode;
+import com.example.knowledgeforge.domain.category.dto.CategoryDto;
+import com.example.knowledgeforge.domain.category.dto.CategoryTreeDto;
+import com.example.knowledgeforge.domain.category.dto.CreateCategoryRequest;
+import com.example.knowledgeforge.domain.category.dto.UpdateCategoryRequest;
+import com.example.knowledgeforge.domain.exception.CategoryNotFoundException;
+import com.example.knowledgeforge.domain.exception.ConflictException;
+import com.example.knowledgeforge.domain.exception.ForbiddenException;
+import com.example.knowledgeforge.domain.exception.ValidationException;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+public class CategoryService {
+
+    private final CategoryDao categoryDao;
+    private final TopicDao topicDao;
+    private final CurrentUser currentUser;
+
+    public CategoryService(CategoryDao categoryDao, TopicDao topicDao, CurrentUser currentUser) {
+        this.categoryDao = categoryDao;
+        this.topicDao = topicDao;
+        this.currentUser = currentUser;
+    }
+
+    public CategoryTreeDto getTree() {
+        Long userId = currentUser.id();
+        CategoryNode root = categoryDao.findByUserIdAndRootTrue(userId)
+                .orElseGet(() -> createVirtualRoot(userId));
+        List<CategoryNode> all = categoryDao.findAllByUserId(userId);
+        Map<UUID, Integer> topicCounts = topicDao.countByCategoryForUser(userId);
+        Map<UUID, Integer> lowDetailCounts = topicDao.countLowDetailByCategoryForUser(userId);
+        return buildTree(root, all, topicCounts, lowDetailCounts);
+    }
+
+    public CategoryDto create(CreateCategoryRequest req) {
+        if (req.name() == null || req.name().isBlank()) {
+            throw new ValidationException("name must not be blank");
+        }
+
+        Long userId = currentUser.id();
+
+        CategoryNode root = categoryDao.findByUserIdAndRootTrue(userId)
+                .orElseGet(() -> createVirtualRoot(userId));
+
+        UUID parentId = req.parentId() != null ? req.parentId() : root.getId();
+
+        categoryDao.findByIdAndUserId(parentId, userId)
+                .orElseThrow(() -> new CategoryNotFoundException(parentId.toString()));
+
+        long nameCount = categoryDao.countByUserIdAndParentIdAndNameIgnoreCase(userId, parentId, req.name());
+        if (nameCount > 0) {
+            throw new ConflictException("A category with name '" + req.name() + "' already exists at this level.");
+        }
+
+        CategoryNode node = new CategoryNode();
+        node.setUserId(userId);
+        node.setParentId(parentId);
+        node.setName(req.name());
+        node.setPosition(0);
+        node.setRoot(false);
+
+        return CategoryDto.from(categoryDao.insert(node));
+    }
+
+    public CategoryDto update(UUID id, UpdateCategoryRequest req) {
+        if (req.name() == null || req.name().isBlank()) {
+            throw new ValidationException("name must not be blank");
+        }
+
+        Long userId = currentUser.id();
+        CategoryNode node = categoryDao.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new CategoryNotFoundException(id.toString()));
+
+        if (node.isRoot()) {
+            throw new ForbiddenException("Cannot modify the virtual root node.");
+        }
+
+        node.setName(req.name());
+
+        return CategoryDto.from(categoryDao.update(node));
+    }
+
+    public void delete(UUID id) {
+        Long userId = currentUser.id();
+        CategoryNode node = categoryDao.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new CategoryNotFoundException(id.toString()));
+
+        if (node.isRoot()) {
+            throw new ForbiddenException("Cannot delete the virtual root node.");
+        }
+
+        if (categoryDao.existsByParentId(id)) {
+            throw new ConflictException("Category has sub-categories. Remove them first.");
+        }
+
+        if (topicDao.existsByUserIdAndCategoryId(userId, id)) {
+            throw new ConflictException("Category has topics. Remove them first.");
+        }
+
+        categoryDao.delete(id);
+    }
+
+    private CategoryNode createVirtualRoot(Long userId) {
+        CategoryNode root = new CategoryNode();
+        root.setUserId(userId);
+        root.setName("__ROOT__");
+        root.setPosition(0);
+        root.setRoot(true);
+        return categoryDao.insert(root);
+    }
+
+    private CategoryTreeDto buildTree(CategoryNode root, List<CategoryNode> all, Map<UUID, Integer> topicCounts,
+                                       Map<UUID, Integer> lowDetailCounts) {
+        Map<UUID, List<CategoryNode>> byParent = all.stream()
+                .filter(n -> n.getParentId() != null)
+                .collect(Collectors.groupingBy(CategoryNode::getParentId));
+
+        return CategoryTreeDto.fromRoot(root, byParent, topicCounts, lowDetailCounts);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/service/CurrentUser.java =====
+
+package com.example.knowledgeforge.service;
+
+import com.example.knowledgeforge.dao.UserDao;
+
+/**
+ * Aplikacja działa bez logowania — wszystkie dane są przypisywane do
+ * jednego domyślnego użytkownika, zakładanego przy starcie przez
+ * {@link com.example.knowledgeforge.config.DefaultUserSeeder}. Wynik
+ * jest buforowany po pierwszym odczycie — id się nie zmienia.
+ */
+public class CurrentUser {
+
+    private final UserDao userDao;
+    private final String defaultUsername;
+    private volatile Long cachedId;
+
+    public CurrentUser(UserDao userDao, String defaultUsername) {
+        this.userDao = userDao;
+        this.defaultUsername = defaultUsername;
+    }
+
+    public Long id() {
+        Long id = cachedId;
+        if (id != null) return id;
+        synchronized (this) {
+            if (cachedId == null) {
+                cachedId = userDao.findByUsername(defaultUsername)
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Default user '" + defaultUsername + "' not found — DefaultUserSeeder should create it at startup"))
+                        .getId();
+            }
+            return cachedId;
+        }
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/service/NoteService.java =====
+
+package com.example.knowledgeforge.service;
+
+import com.example.knowledgeforge.dao.CategoryDao;
+import com.example.knowledgeforge.dao.NoteDao;
+import com.example.knowledgeforge.document.DocumentContainer;
+import com.example.knowledgeforge.domain.category.CategoryNode;
+import com.example.knowledgeforge.domain.exception.NotFoundException;
+import com.example.knowledgeforge.domain.exception.NoteNotFoundException;
+import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.domain.note.Note;
+import com.example.knowledgeforge.domain.note.dto.NoteDto;
+import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
+import com.example.knowledgeforge.domain.topic.Topic;
+import com.example.knowledgeforge.domain.topic.TopicStatus;
+import com.example.knowledgeforge.storage.NoteFileStorage;
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.time.Instant;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.logging.Logger;
+
+/**
+ * Baza danych trzyma tylko ścieżkę do pliku treści (Note.contentPath) —
+ * same bajty .kfdoc czyta i pisze {@link NoteFileStorage} na dysku. PDF nie
+ * jest tu w ogóle: generuje się wyłącznie w przeglądarce, na żądanie
+ * (kliknięcie "Pobierz PDF"), żeby setki notatek nie puchły plikami PDF,
+ * których nikt nigdy nie pobierze.
+ */
+public class NoteService {
+
+    private static final Logger log = Logger.getLogger(NoteService.class.getName());
+
+    private final NoteDao noteDao;
+    private final TopicService topicService;
+    private final CategoryDao categoryDao;
+    private final CurrentUser currentUser;
+    private final NoteFileStorage fileStorage;
+
+    public NoteService(NoteDao noteDao, TopicService topicService, CategoryDao categoryDao,
+                        CurrentUser currentUser, NoteFileStorage fileStorage) {
+        this.noteDao = noteDao;
+        this.topicService = topicService;
+        this.categoryDao = categoryDao;
+        this.currentUser = currentUser;
+        this.fileStorage = fileStorage;
+    }
+
+    public NoteDto getByTopicId(UUID topicId) {
+        Long userId = currentUser.id();
+        topicService.verifyOwnership(topicId, userId);
+        Note note = noteDao.findByTopicIdAndUserId(topicId, userId)
+                .orElseThrow(() -> new NoteNotFoundException(topicId.toString()));
+        log.fine(() -> "getByTopicId " + topicId + " -> version=" + note.getVersion()
+                + " contentPath=" + note.getContentPath());
+        return toDto(note);
+    }
+
+    /** Zapis notatki/instrukcji — jeden upsert, tak jak "Zapisz" w edytorze tekstu. */
+    public NoteDto save(UUID topicId, SaveNoteRequest req) {
+        if (req.contentJson() == null) {
+            throw new ValidationException("contentJson must not be null");
+        }
+
+        Long userId = currentUser.id();
+        Topic topic = topicService.verifyOwnership(topicId, userId);
+        CategoryNode category = categoryDao.findByIdAndUserId(topic.getCategoryId(), userId).orElse(null);
+
+        int assetCount = req.assets() == null ? 0 : req.assets().size();
+        log.info(() -> "save " + topicId + ": incoming assets=" + assetCount);
+
+        Note existing = noteDao.findByTopicId(topicId).orElse(null);
+        UUID noteId = existing != null ? existing.getId() : UUID.randomUUID();
+        Instant noteCreatedAt = existing != null ? existing.getCreatedAt() : Instant.now();
+        int nextVersion = existing != null ? existing.getVersion() + 1 : 1;
+
+        Map<String, Object> metadata = buildMetadata(topic, category, noteId, noteCreatedAt, nextVersion);
+        byte[] contentBytes = DocumentContainer.of(req.contentJson(), decodeAssets(req.assets()), metadata).toBytes();
+        String contentPath = fileStorage.writeContent(topicId, contentBytes);
+        log.fine(() -> "save " + topicId + ": wrote content -> " + contentPath);
+
+        Note note;
+        if (existing != null) {
+            existing.setContentPath(contentPath);
+            existing.setVersion(nextVersion);
+            noteDao.update(existing);
+            note = existing;
+            log.info(() -> "save " + topicId + ": updated note " + note.getId() + " -> version=" + note.getVersion());
+        } else {
+            note = new Note();
+            note.setId(noteId);
+            note.setUserId(userId);
+            note.setTopicId(topicId);
+            note.setContentPath(contentPath);
+            note.setVersion(1);
+            note.setCreatedAt(noteCreatedAt);
+            noteDao.insert(note);
+            log.info(() -> "save " + topicId + ": created note " + note.getId());
+        }
+
+        if (topic.getStatus() == TopicStatus.NEW) {
+            topic.setStatus(TopicStatus.NOTE_ADDED);
+            topicService.save(topic);
+        }
+
+        return toDto(note);
+    }
+
+    public byte[] getAsset(UUID topicId, String filename) {
+        Long userId = currentUser.id();
+        topicService.verifyOwnership(topicId, userId);
+        Note note = noteDao.findByTopicIdAndUserId(topicId, userId)
+                .orElseThrow(() -> new NoteNotFoundException(topicId.toString()));
+        byte[] data = DocumentContainer.fromBytes(fileStorage.read(note.getContentPath())).asset(filename);
+        if (data == null) {
+            log.warning(() -> "getAsset " + topicId + "/" + filename + ": not found in container");
+            throw new NotFoundException("Asset not found: " + filename);
+        }
+        log.fine(() -> "getAsset " + topicId + "/" + filename + ": " + data.length + " bytes");
+        return data;
+    }
+
+    private NoteDto toDto(Note note) {
+        DocumentContainer container = DocumentContainer.fromBytes(fileStorage.read(note.getContentPath()));
+        JsonNode content = container.contentJson();
+        DocumentContainer.rewriteImageSrc(content, filename -> "/api/topics/" + note.getTopicId() + "/note/assets/" + filename);
+        return new NoteDto(note.getId(), note.getTopicId(), content, note.getVersion(), note.getCreatedAt(), note.getUpdatedAt());
+    }
+
+    /**
+     * Jawne metadane z encji Topic/Note, dopisywane do manifestu .kfdoc obok samej treści —
+     * plik na dysku ma więc być kompletną, samodzielną kopią (metadane + treść), czytelną
+     * poza aplikacją zwykłym archiwizatorem ZIP.
+     */
+    private Map<String, Object> buildMetadata(Topic topic, CategoryNode category, UUID noteId,
+                                               Instant noteCreatedAt, int version) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("topicId", topic.getId());
+        metadata.put("noteId", noteId);
+        metadata.put("title", topic.getTitle());
+        metadata.put("shortPrompt", topic.getShortPrompt());
+        metadata.put("author", topic.getAuthor());
+        metadata.put("type", topic.getType());
+        metadata.put("detailLevel", topic.getDetailLevel());
+        metadata.put("categoryId", topic.getCategoryId());
+        metadata.put("categoryName", category != null ? category.getName() : null);
+        metadata.put("topicCreatedAt", topic.getCreatedAt());
+        metadata.put("topicUpdatedAt", topic.getUpdatedAt());
+        metadata.put("noteCreatedAt", noteCreatedAt);
+        metadata.put("noteVersion", version);
+        metadata.put("savedAt", Instant.now());
+        return metadata;
+    }
+
+    private Map<String, byte[]> decodeAssets(List<SaveNoteRequest.AssetPayload> assets) {
+        if (assets == null || assets.isEmpty()) return Map.of();
+        Map<String, byte[]> map = new HashMap<>();
+        for (SaveNoteRequest.AssetPayload asset : assets) {
+            map.put(asset.id(), Base64.getDecoder().decode(asset.dataBase64()));
+        }
+        return map;
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/service/SearchService.java =====
+
+package com.example.knowledgeforge.service;
+
+import com.example.knowledgeforge.dao.NoteDao;
+import com.example.knowledgeforge.dao.TopicDao;
+import com.example.knowledgeforge.document.DocumentContainer;
+import com.example.knowledgeforge.domain.note.Note;
+import com.example.knowledgeforge.domain.search.SearchResultDto;
+import com.example.knowledgeforge.domain.topic.Topic;
+import com.example.knowledgeforge.storage.NoteFileStorage;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
+import java.util.logging.Logger;
+
+/**
+ * Proste, pełne przeszukanie (bez indeksu) — tytuł, opis i treść (wyciągnięta
+ * z .kfdoc) każdego wpisu użytkownika. Dla bazy wiedzy jednej osoby (dziesiątki/
+ * setki wpisów, nie miliony) to jest szybsze do napisania i zrozumienia niż
+ * jakikolwiek silnik wyszukiwania, i wystarczająco szybkie w praktyce.
+ */
+public class SearchService {
+
+    private static final Logger log = Logger.getLogger(SearchService.class.getName());
+    private static final int SNIPPET_RADIUS = 50;
+
+    private final TopicDao topicDao;
+    private final NoteDao noteDao;
+    private final CurrentUser currentUser;
+    private final NoteFileStorage fileStorage;
+
+    public SearchService(TopicDao topicDao, NoteDao noteDao, CurrentUser currentUser, NoteFileStorage fileStorage) {
+        this.topicDao = topicDao;
+        this.noteDao = noteDao;
+        this.currentUser = currentUser;
+        this.fileStorage = fileStorage;
+    }
+
+    public List<SearchResultDto> search(String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        Long userId = currentUser.id();
+
+        List<Topic> topics = topicDao.findAllByUserId(userId);
+        Map<UUID, Note> notesByTopic = new HashMap<>();
+        for (Note note : noteDao.findAllByUserId(userId)) {
+            notesByTopic.put(note.getTopicId(), note);
+        }
+
+        List<SearchResultDto> results = new ArrayList<>();
+        for (Topic topic : topics) {
+            SearchResultDto hit = matchTopic(topic, notesByTopic.get(topic.getId()), q);
+            if (hit != null) {
+                results.add(hit);
+            }
+        }
+        log.fine(() -> "search '" + query + "': " + results.size() + " hit(s) out of " + topics.size() + " topic(s)");
+        return results;
+    }
+
+    private SearchResultDto matchTopic(Topic topic, Note note, String q) {
+        String title = topic.getTitle() == null ? "" : topic.getTitle();
+        String description = topic.getShortPrompt() == null ? "" : topic.getShortPrompt();
+
+        if (title.toLowerCase(Locale.ROOT).contains(q)) {
+            return new SearchResultDto(topic.getId(), topic.getCategoryId(), topic.getTitle(),
+                    topic.getType(), topic.getDetailLevel(), "TITLE", title);
+        }
+        if (description.toLowerCase(Locale.ROOT).contains(q)) {
+            return new SearchResultDto(topic.getId(), topic.getCategoryId(), topic.getTitle(),
+                    topic.getType(), topic.getDetailLevel(), "DESCRIPTION", description);
+        }
+        if (note != null) {
+            String content = DocumentContainer.fromBytes(fileStorage.read(note.getContentPath())).extractPlainText();
+            String lower = content.toLowerCase(Locale.ROOT);
+            int idx = lower.indexOf(q);
+            if (idx >= 0) {
+                return new SearchResultDto(topic.getId(), topic.getCategoryId(), topic.getTitle(),
+                        topic.getType(), topic.getDetailLevel(), "CONTENT", snippet(content, idx, q.length()));
+            }
+        }
+        return null;
+    }
+
+    private String snippet(String text, int matchIndex, int matchLength) {
+        int start = Math.max(0, matchIndex - SNIPPET_RADIUS);
+        int end = Math.min(text.length(), matchIndex + matchLength + SNIPPET_RADIUS);
+        String s = text.substring(start, end).trim();
+        return (start > 0 ? "…" : "") + s + (end < text.length() ? "…" : "");
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/service/TopicService.java =====
+
+package com.example.knowledgeforge.service;
+
+import com.example.knowledgeforge.dao.CategoryDao;
+import com.example.knowledgeforge.dao.TopicDao;
+import com.example.knowledgeforge.domain.category.CategoryNode;
+import com.example.knowledgeforge.domain.exception.CategoryNotFoundException;
+import com.example.knowledgeforge.domain.exception.TopicNotFoundException;
+import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.Topic;
+import com.example.knowledgeforge.domain.topic.TopicStatus;
+import com.example.knowledgeforge.domain.topic.dto.CreateTopicRequest;
+import com.example.knowledgeforge.domain.topic.dto.TopicDto;
+import com.example.knowledgeforge.domain.topic.dto.UpdateTopicRequest;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.logging.Logger;
+import java.util.stream.Collectors;
+
+public class TopicService {
+
+    private static final Logger log = Logger.getLogger(TopicService.class.getName());
+
+    private final TopicDao topicDao;
+    private final CategoryDao categoryDao;
+    private final CurrentUser currentUser;
+
+    public TopicService(TopicDao topicDao, CategoryDao categoryDao, CurrentUser currentUser) {
+        this.topicDao = topicDao;
+        this.categoryDao = categoryDao;
+        this.currentUser = currentUser;
+    }
+
+    public TopicDto create(CreateTopicRequest req) {
+        if (req.title() == null || req.title().isBlank()) {
+            throw new ValidationException("title must not be blank");
+        }
+        if (req.detailLevel() == null) {
+            throw new ValidationException("detailLevel must not be null");
+        }
+        if (req.type() == null) {
+            throw new ValidationException("type must not be null");
+        }
+        if (req.categoryId() == null) {
+            throw new ValidationException("categoryId must not be null");
+        }
+
+        Long userId = currentUser.id();
+
+        categoryDao.findByIdAndUserId(req.categoryId(), userId)
+                .orElseThrow(() -> new CategoryNotFoundException(req.categoryId().toString()));
+
+        Topic topic = new Topic();
+        topic.setUserId(userId);
+        topic.setCategoryId(req.categoryId());
+        topic.setTitle(req.title());
+        topic.setShortPrompt(req.shortPrompt());
+        topic.setAuthor(blankToNull(req.author()));
+        topic.setDetailLevel(req.detailLevel());
+        topic.setType(req.type());
+        topic.setStatus(TopicStatus.NEW);
+
+        Topic saved = topicDao.insert(topic);
+        log.info(() -> "Created topic " + saved.getId() + " (" + saved.getType() + ", " + saved.getDetailLevel() + ")");
+        return TopicDto.from(saved);
+    }
+
+    public TopicDto getById(UUID id) {
+        Long userId = currentUser.id();
+        Topic topic = topicDao.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new TopicNotFoundException(id.toString()));
+        return TopicDto.from(topic);
+    }
+
+    public List<TopicDto> listByCategory(UUID categoryId) {
+        Long userId = currentUser.id();
+
+        categoryDao.findByIdAndUserId(categoryId, userId)
+                .orElseThrow(() -> new CategoryNotFoundException(categoryId.toString()));
+
+        return topicDao.findAllByUserIdAndCategoryIdOrderByCreatedAtDesc(userId, categoryId)
+                .stream()
+                .map(TopicDto::from)
+                .collect(Collectors.toList());
+    }
+
+    /** Autorzy użyci choć raz przez użytkownika — zasila listę wyboru w panelu filtrów. */
+    public List<String> listAuthors() {
+        return topicDao.findDistinctAuthors(currentUser.id());
+    }
+
+    /**
+     * Proste, pełne przeszukanie po filtrach (bez indeksu) — spójne z podejściem SearchService.
+     * categoryId obejmuje też wszystkie podkategorie wybranej kategorii (filtr "w dół" drzewa).
+     * Bez żadnego filtra świadomie zwraca pustą listę, żeby przypadkowe wywołanie nie zrzucało
+     * całej bazy wiedzy.
+     */
+    public List<TopicDto> filter(String author, DetailLevel detailLevel, UUID categoryId) {
+        if (author == null && detailLevel == null && categoryId == null) {
+            return List.of();
+        }
+        Long userId = currentUser.id();
+        Set<UUID> categoryScope = categoryId == null ? null : resolveCategoryScope(userId, categoryId);
+
+        return topicDao.findAllByUserId(userId).stream()
+                .filter(t -> author == null || author.equalsIgnoreCase(t.getAuthor()))
+                .filter(t -> detailLevel == null || detailLevel == t.getDetailLevel())
+                .filter(t -> categoryScope == null || categoryScope.contains(t.getCategoryId()))
+                .map(TopicDto::from)
+                .collect(Collectors.toList());
+    }
+
+    /** Wybrana kategoria + wszystkie jej podkategorie, dowolnej głębokości (obchód w głąb). */
+    private Set<UUID> resolveCategoryScope(Long userId, UUID categoryId) {
+        Map<UUID, List<CategoryNode>> byParent = categoryDao.findAllByUserId(userId).stream()
+                .filter(n -> n.getParentId() != null)
+                .collect(Collectors.groupingBy(CategoryNode::getParentId));
+
+        Set<UUID> scope = new HashSet<>();
+        Deque<UUID> stack = new ArrayDeque<>();
+        stack.push(categoryId);
+        while (!stack.isEmpty()) {
+            UUID id = stack.pop();
+            if (!scope.add(id)) continue;
+            for (CategoryNode child : byParent.getOrDefault(id, List.of())) {
+                stack.push(child.getId());
+            }
+        }
+        return scope;
+    }
+
+    public TopicDto update(UUID id, UpdateTopicRequest req) {
+        Long userId = currentUser.id();
+        Topic topic = topicDao.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new TopicNotFoundException(id.toString()));
+
+        if (req.title() != null && !req.title().isBlank()) {
+            topic.setTitle(req.title());
+        }
+        if (req.shortPrompt() != null) {
+            topic.setShortPrompt(req.shortPrompt());
+        }
+        // Pusty string = świadome wyczyszczenie autora; null = pole nieobecne w tym częściowym update.
+        if (req.author() != null) {
+            topic.setAuthor(blankToNull(req.author()));
+        }
+        if (req.detailLevel() != null) {
+            topic.setDetailLevel(req.detailLevel());
+        }
+        if (req.type() != null) {
+            topic.setType(req.type());
+        }
+
+        Topic saved = topicDao.update(topic);
+        log.fine(() -> "Updated topic " + saved.getId());
+        return TopicDto.from(saved);
+    }
+
+    public void delete(UUID id) {
+        Long userId = currentUser.id();
+        Topic topic = topicDao.findByIdAndUserId(id, userId)
+                .orElseThrow(() -> new TopicNotFoundException(id.toString()));
+        topicDao.delete(topic.getId());
+        log.info(() -> "Deleted topic " + id);
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s;
+    }
+
+    /** Używane przez NoteService do potwierdzenia własności tematu. */
+    Topic verifyOwnership(UUID topicId, Long userId) {
+        return topicDao.findByIdAndUserId(topicId, userId)
+                .orElseThrow(() -> new TopicNotFoundException(topicId.toString()));
+    }
+
+    void save(Topic topic) {
+        topicDao.update(topic);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/storage/NoteFileStorage.java =====
+
+package com.example.knowledgeforge.storage;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.UUID;
+import java.util.logging.Logger;
+
+/**
+ * Baza danych trzyma tylko ścieżkę (String) do pliku treści — sama notatka
+ * (.kfdoc) leży jako zwykły plik na dysku, pod {@code notes.storage.path}.
+ * Aplikacja wczytuje ją z dysku na żądanie; podczas edycji treść żyje w
+ * pamięci przeglądarki (edytor), tak jak w każdym edytorze tekstu.
+ * PDF nie jest tu w ogóle trzymany — generuje się wyłącznie w przeglądarce,
+ * na żądanie, żeby setki notatek nie puchły plikami, których nikt nie pobierze.
+ */
+public class NoteFileStorage {
+
+    private static final Logger log = Logger.getLogger(NoteFileStorage.class.getName());
+
+    private final Path baseDir;
+
+    public NoteFileStorage(Path baseDir) {
+        this.baseDir = baseDir;
+        try {
+            Files.createDirectories(baseDir);
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to create notes storage folder: " + baseDir, e);
+        }
+        log.info(() -> "Notes storage folder: " + baseDir.toAbsolutePath());
+    }
+
+    public Path baseDir() {
+        return baseDir;
+    }
+
+    /** Zapisuje treść notatki (.kfdoc) na dysk i zwraca jej ścieżkę (do zapisania w bazie). */
+    public String writeContent(UUID topicId, byte[] data) {
+        Path path = contentPath(topicId);
+        try {
+            Files.write(path, data);
+            log.fine(() -> "Wrote " + data.length + " bytes -> " + path);
+            return path.toString();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Failed to write note file: " + path, e);
+        }
+    }
+
+    public byte[] read(String path) {
+        if (path == null) return null;
+        try {
+            return Files.readAllBytes(Path.of(path));
+        } catch (IOException e) {
+            log.warning(() -> "Failed to read note file: " + path + " (" + e.getMessage() + ")");
+            return null;
+        }
+    }
+
+    private Path contentPath(UUID topicId) {
+        return baseDir.resolve(topicId + ".kfdoc");
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/web/ApiServlet.java =====
+
+package com.example.knowledgeforge.web;
+
+import com.example.knowledgeforge.domain.exception.ConflictException;
+import com.example.knowledgeforge.domain.exception.ForbiddenException;
+import com.example.knowledgeforge.domain.exception.NotFoundException;
+import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.json.JsonMapper;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.util.Map;
+import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+/**
+ * Bazowy serwlet dla zasobów JSON — zastępuje to, co dawał Spring MVC:
+ * routing na podstawie ścieżki/metody, (de)serializację ciała żądania
+ * i mapowanie wyjątków domenowych na kody HTTP (dawny GlobalExceptionHandler).
+ *
+ * HttpServlet nie ma wbudowanego dopatch(), więc dispatch robimy sami
+ * w service() i wołamy własną metodę doPatch tam, gdzie jest potrzebna.
+ */
+public abstract class ApiServlet extends HttpServlet {
+
+    protected static final Logger log = Logger.getLogger(ApiServlet.class.getName());
+
+    @Override
+    protected void service(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
+        log.fine(() -> req.getMethod() + " " + req.getRequestURI());
+        try {
+            switch (req.getMethod()) {
+                case "GET" -> handle(req, resp, () -> doGet(req, resp));
+                case "POST" -> handle(req, resp, () -> doPost(req, resp));
+                case "PUT" -> handle(req, resp, () -> doPut(req, resp));
+                case "PATCH" -> handle(req, resp, () -> doPatch(req, resp));
+                case "DELETE" -> handle(req, resp, () -> doDelete(req, resp));
+                case "OPTIONS" -> resp.setStatus(HttpServletResponse.SC_NO_CONTENT);
+                default -> resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+            }
+        } catch (RuntimeException e) {
+            // handle() już przechwyciło znane wyjątki; to tylko ostatnia siatka
+            writeError(resp, 500, "Unexpected error: " + e.getMessage());
+            log.log(Level.SEVERE, "Unhandled error in " + req.getMethod() + " " + req.getRequestURI(), e);
+        }
+    }
+
+    /** Domyślne no-op — konkretny serwlet nadpisuje metody, których faktycznie używa. */
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+    }
+
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+    }
+
+    protected void doPut(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+    }
+
+    protected void doPatch(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+    }
+
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        resp.sendError(HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+    }
+
+    @FunctionalInterface
+    private interface Action {
+        void run() throws IOException;
+    }
+
+    private void handle(HttpServletRequest req, HttpServletResponse resp, Action action) throws IOException {
+        try {
+            action.run();
+        } catch (NotFoundException e) {
+            writeError(resp, 404, e.getMessage());
+        } catch (ConflictException e) {
+            writeError(resp, 409, e.getMessage());
+        } catch (ForbiddenException e) {
+            writeError(resp, 403, e.getMessage());
+        } catch (ValidationException e) {
+            writeError(resp, 400, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            writeError(resp, 400, e.getMessage());
+        } catch (Exception e) {
+            log.log(Level.SEVERE, "Error handling " + req.getMethod() + " " + req.getRequestURI(), e);
+            writeError(resp, 500, "An unexpected error occurred: " + e.getMessage());
+        }
+    }
+
+    // ── Pomocnicze — JSON i ścieżka ─────────────────────────────────
+
+    protected <T> T readJson(HttpServletRequest req, Class<T> type) throws IOException {
+        try (var in = req.getInputStream()) {
+            return JsonMapper.get().readValue(in, type);
+        } catch (IOException e) {
+            throw new ValidationException("Malformed JSON body: " + e.getMessage());
+        }
+    }
+
+    protected void writeJson(HttpServletResponse resp, int status, Object body) throws IOException {
+        resp.setStatus(status);
+        resp.setContentType("application/json;charset=UTF-8");
+        if (body != null) {
+            JsonMapper.get().writeValue(resp.getOutputStream(), body);
+        }
+    }
+
+    protected void writeBinary(HttpServletResponse resp, int status, String contentType, byte[] data) throws IOException {
+        resp.setStatus(status);
+        resp.setContentType(contentType);
+        resp.setContentLength(data.length);
+        resp.getOutputStream().write(data);
+    }
+
+    protected void writeError(HttpServletResponse resp, int status, String message) throws IOException {
+        writeJson(resp, status, Map.of("message", message == null ? "" : message));
+    }
+
+    /** Segmenty ścieżki po ścieżce serwletu, bez wiodącego/końcowego '/'. Np. "/abc/def" -> ["abc","def"]. */
+    protected String[] pathSegments(HttpServletRequest req) {
+        String pathInfo = req.getPathInfo();
+        if (pathInfo == null || pathInfo.equals("/")) return new String[0];
+        String trimmed = pathInfo.startsWith("/") ? pathInfo.substring(1) : pathInfo;
+        if (trimmed.endsWith("/")) trimmed = trimmed.substring(0, trimmed.length() - 1);
+        return trimmed.split("/");
+    }
+
+    protected UUID parseUuid(String value) {
+        try {
+            return UUID.fromString(value);
+        } catch (IllegalArgumentException e) {
+            throw new ValidationException("Invalid id: " + value);
+        }
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/web/CategoryServlet.java =====
+
+package com.example.knowledgeforge.web;
+
+import com.example.knowledgeforge.domain.category.dto.CreateCategoryRequest;
+import com.example.knowledgeforge.domain.category.dto.UpdateCategoryRequest;
+import com.example.knowledgeforge.service.CategoryService;
+import com.example.knowledgeforge.service.TopicService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.util.UUID;
+
+/** Mapowany na /api/categories/*. Zawiera też odczyt tematów danej kategorii. */
+public class CategoryServlet extends ApiServlet {
+
+    private final CategoryService categoryService;
+    private final TopicService topicService;
+
+    public CategoryServlet(CategoryService categoryService, TopicService topicService) {
+        this.categoryService = categoryService;
+        this.topicService = topicService;
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 1 && "tree".equals(seg[0])) {
+            writeJson(resp, 200, categoryService.getTree());
+        } else if (seg.length == 2 && "topics".equals(seg[1])) {
+            writeJson(resp, 200, topicService.listByCategory(parseUuid(seg[0])));
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 0) {
+            var dto = categoryService.create(readJson(req, CreateCategoryRequest.class));
+            writeJson(resp, 201, dto);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doPatch(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 1) {
+            UUID id = parseUuid(seg[0]);
+            var dto = categoryService.update(id, readJson(req, UpdateCategoryRequest.class));
+            writeJson(resp, 200, dto);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 1) {
+            categoryService.delete(parseUuid(seg[0]));
+            resp.setStatus(204);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/web/CorsFilter.java =====
+
+package com.example.knowledgeforge.web;
+
+import jakarta.servlet.Filter;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletRequest;
+import jakarta.servlet.ServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+
+/** Ręczny odpowiednik dawnej Spring CorsConfig — jeden prosty filtr serwletowy. */
+public class CorsFilter implements Filter {
+
+    private final String allowedOrigin;
+
+    public CorsFilter(String allowedOrigin) {
+        this.allowedOrigin = allowedOrigin;
+    }
+
+    @Override
+    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+            throws IOException, ServletException {
+        HttpServletRequest req = (HttpServletRequest) request;
+        HttpServletResponse resp = (HttpServletResponse) response;
+
+        resp.setHeader("Access-Control-Allow-Origin", allowedOrigin);
+        resp.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+        resp.setHeader("Access-Control-Allow-Headers", "*");
+        resp.setHeader("Access-Control-Allow-Credentials", "true");
+
+        if ("OPTIONS".equalsIgnoreCase(req.getMethod())) {
+            resp.setStatus(HttpServletResponse.SC_NO_CONTENT);
+            return;
+        }
+
+        chain.doFilter(request, response);
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/web/SearchServlet.java =====
+
+package com.example.knowledgeforge.web;
+
+import com.example.knowledgeforge.service.SearchService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+
+/** Mapowany na /api/search — GET /api/search?q=... */
+public class SearchServlet extends ApiServlet {
+
+    private final SearchService searchService;
+
+    public SearchServlet(SearchService searchService) {
+        this.searchService = searchService;
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String q = req.getParameter("q");
+        writeJson(resp, 200, searchService.search(q));
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/web/SpaServlet.java =====
+
+package com.example.knowledgeforge.web;
+
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.Map;
+
+/**
+ * Serwuje zbudowany frontend z classpath:/static (spakowany do JAR-a razem
+ * z klasami). Pliki z kropką w nazwie (main.js, index.css, favicon.svg) są
+ * serwowane wprost; wszystko inne (trasy React Router, np. /dashboard) trafia
+ * do index.html — zastępuje dawny SpaController + Spring resource handler.
+ */
+public class SpaServlet extends HttpServlet {
+
+    private static final Map<String, String> CONTENT_TYPES = Map.ofEntries(
+            Map.entry("html", "text/html;charset=UTF-8"),
+            Map.entry("js", "application/javascript;charset=UTF-8"),
+            Map.entry("css", "text/css;charset=UTF-8"),
+            Map.entry("json", "application/json;charset=UTF-8"),
+            Map.entry("svg", "image/svg+xml"),
+            Map.entry("ico", "image/x-icon"),
+            Map.entry("png", "image/png"),
+            Map.entry("jpg", "image/jpeg"),
+            Map.entry("jpeg", "image/jpeg"),
+            Map.entry("woff", "font/woff"),
+            Map.entry("woff2", "font/woff2"),
+            Map.entry("map", "application/json;charset=UTF-8")
+    );
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String path = req.getServletPath();
+        if (path == null || path.isEmpty() || path.equals("/")) {
+            path = "/index.html";
+        }
+
+        String lastSegment = path.substring(path.lastIndexOf('/') + 1);
+        boolean looksLikeFile = lastSegment.contains(".");
+
+        String resourcePath = "/static" + path;
+        InputStream in = looksLikeFile ? getClass().getResourceAsStream(resourcePath) : null;
+
+        if (in == null) {
+            // SPA route (no dot) or unknown static path -> fall back to index.html
+            resourcePath = "/static/index.html";
+            in = getClass().getResourceAsStream(resourcePath);
+            if (in == null) {
+                resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+                return;
+            }
+        }
+
+        resp.setContentType(contentTypeFor(resourcePath));
+        try (InputStream input = in; OutputStream out = resp.getOutputStream()) {
+            input.transferTo(out);
+        }
+    }
+
+    private String contentTypeFor(String resourcePath) {
+        int dot = resourcePath.lastIndexOf('.');
+        String ext = dot >= 0 ? resourcePath.substring(dot + 1).toLowerCase() : "";
+        return CONTENT_TYPES.getOrDefault(ext, "application/octet-stream");
+    }
+}
+
+
+===== ./src/main/java/com/example/knowledgeforge/web/TopicServlet.java =====
+
+package com.example.knowledgeforge.web;
+
+import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
+import com.example.knowledgeforge.domain.topic.DetailLevel;
+import com.example.knowledgeforge.domain.topic.dto.CreateTopicRequest;
+import com.example.knowledgeforge.domain.topic.dto.UpdateTopicRequest;
+import com.example.knowledgeforge.service.NoteService;
+import com.example.knowledgeforge.service.TopicService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Mapowany na /api/topics/*. Obsługuje CRUD tematu oraz zagnieżdżony
+ * podzasób notatki/instrukcji: /api/topics/{id}/note (treść edytora),
+ * /note/assets/{plik} (wklejone obrazki). PDF generuje się wyłącznie
+ * w przeglądarce, na żądanie — brak tu po niego endpointu.
+ * GET /api/topics?author=&detailLevel=&categoryId= — filtr do panelu "Filtry".
+ * GET /api/topics/authors — lista autorów do rozwijanego wyboru w filtrze.
+ */
+public class TopicServlet extends ApiServlet {
+
+    private static final Map<String, String> ASSET_CONTENT_TYPES = Map.of(
+            "png", "image/png",
+            "jpg", "image/jpeg",
+            "jpeg", "image/jpeg",
+            "gif", "image/gif",
+            "webp", "image/webp"
+    );
+
+    private final TopicService topicService;
+    private final NoteService noteService;
+
+    public TopicServlet(TopicService topicService, NoteService noteService) {
+        this.topicService = topicService;
+        this.noteService = noteService;
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 0) {
+            writeJson(resp, 200, topicService.filter(
+                    blankToNull(req.getParameter("author")),
+                    parseDetailLevel(req.getParameter("detailLevel")),
+                    blankToNull(req.getParameter("categoryId")) == null ? null : parseUuid(req.getParameter("categoryId"))
+            ));
+        } else if (seg.length == 1 && "authors".equals(seg[0])) {
+            writeJson(resp, 200, topicService.listAuthors());
+        } else if (seg.length == 1) {
+            writeJson(resp, 200, topicService.getById(parseUuid(seg[0])));
+        } else if (seg.length == 2 && "note".equals(seg[1])) {
+            writeJson(resp, 200, noteService.getByTopicId(parseUuid(seg[0])));
+        } else if (seg.length == 4 && "note".equals(seg[1]) && "assets".equals(seg[2])) {
+            byte[] data = noteService.getAsset(parseUuid(seg[0]), seg[3]);
+            writeBinary(resp, 200, contentTypeFor(seg[3]), data);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 0) {
+            var dto = topicService.create(readJson(req, CreateTopicRequest.class));
+            writeJson(resp, 201, dto);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doPut(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 2 && "note".equals(seg[1])) {
+            var dto = noteService.save(parseUuid(seg[0]), readJson(req, SaveNoteRequest.class));
+            writeJson(resp, 200, dto);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doPatch(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 1) {
+            UUID id = parseUuid(seg[0]);
+            var dto = topicService.update(id, readJson(req, UpdateTopicRequest.class));
+            writeJson(resp, 200, dto);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    @Override
+    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        String[] seg = pathSegments(req);
+        if (seg.length == 1) {
+            topicService.delete(parseUuid(seg[0]));
+            resp.setStatus(204);
+        } else {
+            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
+        }
+    }
+
+    private String contentTypeFor(String filename) {
+        int dot = filename.lastIndexOf('.');
+        String ext = dot >= 0 ? filename.substring(dot + 1).toLowerCase() : "";
+        return ASSET_CONTENT_TYPES.getOrDefault(ext, "application/octet-stream");
+    }
+
+    private String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s;
+    }
+
+    private DetailLevel parseDetailLevel(String s) {
+        String v = blankToNull(s);
+        return v == null ? null : DetailLevel.valueOf(v);
+    }
+}

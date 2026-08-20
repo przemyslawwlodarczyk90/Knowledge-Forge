@@ -18,6 +18,9 @@ public final class Database {
         hc.setMaximumPoolSize(10);
         hc.setMinimumIdle(2);
         hc.setPoolName("knowledge-forge-pool");
+        // Pozwala DatabaseRestoreService bezpiecznie zawiesić/wznowić pulę na czas pg_restore
+        // (żeby idle-połączenia z puli nie trzymały blokad, których potrzebuje --clean).
+        hc.setAllowPoolSuspension(true);
         return new HikariDataSource(hc);
     }
 }

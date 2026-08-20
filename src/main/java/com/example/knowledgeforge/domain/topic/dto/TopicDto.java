@@ -21,13 +21,23 @@ public class TopicDto {
     private TopicStatus status;
     private Instant createdAt;
     private Instant updatedAt;
+    /** Optimistic locking — frontend odsyła tę wartość jako expectedVersion przy kolejnym PATCH-u. */
+    private Integer version;
+    /**
+     * Wypełniane WYŁĄCZNIE w odpowiedzi na utworzenie tematu (POST /api/topics) — bezpośrednia
+     * (bez podkategorii) liczba tematów w tej kategorii tuż po insercie, policzona w TEJ SAMEJ
+     * transakcji co insert. Pozwala karcie, która wykonała operację, natychmiast zaktualizować
+     * licznik bez ślepego +1 (zob. DashboardPage#handleTopicCreated / updateCategoryTopicCount).
+     * null dla wszystkich pozostałych odpowiedzi (get/list/update).
+     */
+    private Integer categoryTopicCount;
 
     public TopicDto() {
     }
 
     public TopicDto(UUID id, Long userId, UUID categoryId, String title, String shortPrompt, String author,
                     DetailLevel detailLevel, TopicType type, TopicStatus status,
-                    Instant createdAt, Instant updatedAt) {
+                    Instant createdAt, Instant updatedAt, Integer version) {
         this.id = id;
         this.userId = userId;
         this.categoryId = categoryId;
@@ -39,12 +49,13 @@ public class TopicDto {
         this.status = status;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
+        this.version = version;
     }
 
     public static TopicDto from(Topic t) {
         return new TopicDto(
                 t.getId(), t.getUserId(), t.getCategoryId(), t.getTitle(), t.getShortPrompt(), t.getAuthor(),
-                t.getDetailLevel(), t.getType(), t.getStatus(), t.getCreatedAt(), t.getUpdatedAt()
+                t.getDetailLevel(), t.getType(), t.getStatus(), t.getCreatedAt(), t.getUpdatedAt(), t.getVersion()
         );
     }
 
@@ -80,4 +91,10 @@ public class TopicDto {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public Integer getVersion() { return version; }
+    public void setVersion(Integer version) { this.version = version; }
+
+    public Integer getCategoryTopicCount() { return categoryTopicCount; }
+    public void setCategoryTopicCount(Integer categoryTopicCount) { this.categoryTopicCount = categoryTopicCount; }
 }

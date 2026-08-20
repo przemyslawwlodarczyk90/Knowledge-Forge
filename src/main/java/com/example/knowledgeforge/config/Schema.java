@@ -68,6 +68,11 @@ public final class Schema {
 
             "ALTER TABLE topic ADD COLUMN IF NOT EXISTS author TEXT",
 
+            // Optimistic locking — chroni przed cichym nadpisaniem, gdy dwóch użytkowników
+            // edytuje ten sam temat (np. poziom szczegółowości) prawie jednocześnie.
+            // Zob. TopicDao#update / TopicDao#updateStatus (WHERE version = ?).
+            "ALTER TABLE topic ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1",
+
             "ALTER TABLE topic ADD COLUMN IF NOT EXISTS type TEXT",
             "UPDATE topic SET type = 'NOTE' WHERE type IS NULL",
             "ALTER TABLE topic ALTER COLUMN type SET NOT NULL",
@@ -106,7 +111,31 @@ public final class Schema {
             // Quiz w tej wersji aplikacji nie istnieje — feature bez UI, bez danych, do wycięcia.
             "DROP TABLE IF EXISTS quiz_attempt",
             "DROP TABLE IF EXISTS user_progress",
-            "DROP TABLE IF EXISTS quiz"
+            "DROP TABLE IF EXISTS quiz",
+
+            // ── Załączniki — baza trzyma WYŁĄCZNIE metadane + względną ścieżkę (relative_path);
+            // same bajty pliku leżą na dysku pod attachments.storage.path (zob. storage.AttachmentStorage).
+            // ON DELETE CASCADE to siatka bezpieczeństwa na poziomie integralności danych (żaden
+            // rekord attachment nie może przeżyć skasowanego tematu) — ale to NIE zwalnia z usuwania
+            // fizycznego pliku w kontrolowany sposób: TopicService.delete() woła najpierw
+            // AttachmentService, żeby skasować pliki z dysku (z logowaniem błędów), zanim skasuje
+            // sam temat. Diagnostyka (AttachmentDiagnosticsService) wyłapie każdy wyjątek od tej reguły.
+            """
+            CREATE TABLE IF NOT EXISTS attachment (
+                id BIGSERIAL PRIMARY KEY,
+                topic_id UUID NOT NULL REFERENCES topic(id) ON DELETE CASCADE,
+                original_name TEXT NOT NULL,
+                stored_name TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                content_type TEXT,
+                size_bytes BIGINT NOT NULL,
+                attachment_type TEXT NOT NULL,
+                description TEXT,
+                checksum_sha256 TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_attachment_topic_id ON attachment(topic_id)"
     );
 
     private Schema() {

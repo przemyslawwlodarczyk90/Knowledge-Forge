@@ -13,7 +13,10 @@ import java.util.List;
  */
 public record SaveNoteRequest(
         JsonNode contentJson,
-        List<AssetPayload> assets
+        List<AssetPayload> assets,
+        /** Optimistic locking — wersja, na której użytkownik zaczął edycję (NoteDto.version z ostatniego GET/PUT).
+         *  Wymagane przy nadpisywaniu istniejącej notatki; ignorowane przy tworzeniu pierwszej wersji. */
+        Integer baseVersion
 ) {
     public record AssetPayload(String id, String mimeType, String dataBase64) {
     }

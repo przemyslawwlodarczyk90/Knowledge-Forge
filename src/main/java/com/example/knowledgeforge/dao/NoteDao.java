@@ -27,9 +27,17 @@ public class NoteDao {
     }
 
     public Optional<Note> findByTopicId(UUID topicId) {
+        try (Connection con = dataSource.getConnection()) {
+            return findByTopicId(con, topicId);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query note by topic", e);
+        }
+    }
+
+    /** Wariant na przekazanym połączeniu — do użycia wewnątrz szerszej transakcji (zob. NoteService#save). */
+    public Optional<Note> findByTopicId(Connection con, UUID topicId) {
         String sql = "SELECT * FROM note WHERE topic_id = ?";
-        try (Connection con = dataSource.getConnection();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setObject(1, topicId);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? Optional.of(map(rs)) : Optional.empty();
@@ -70,6 +78,15 @@ public class NoteDao {
     }
 
     public Note insert(Note note) {
+        try (Connection con = dataSource.getConnection()) {
+            return insert(con, note);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to insert note", e);
+        }
+    }
+
+    /** Wariant na przekazanym połączeniu — do użycia wewnątrz szerszej transakcji (zob. NoteService#save). */
+    public Note insert(Connection con, Note note) {
         if (note.getId() == null) note.setId(UUID.randomUUID());
         // createdAt bywa ustawiany z wyprzedzeniem przez NoteService (żeby dokładnie ten sam
         // znacznik czasu trafił też do metadanych w pliku .kfdoc) — tu tylko domyślamy, gdy brak.
@@ -81,8 +98,7 @@ public class NoteDao {
                 INSERT INTO note (id, user_id, topic_id, content_path, version, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection con = dataSource.getConnection();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setObject(1, note.getId());
             ps.setLong(2, note.getUserId());
             ps.setObject(3, note.getTopicId());
@@ -97,17 +113,21 @@ public class NoteDao {
         }
     }
 
-    public Note update(Note note) {
-        note.setUpdatedAt(Instant.now());
-        String sql = "UPDATE note SET content_path = ?, version = ?, updated_at = ? WHERE id = ?";
-        try (Connection con = dataSource.getConnection();
-             PreparedStatement ps = con.prepareStatement(sql)) {
-            ps.setString(1, note.getContentPath());
-            ps.setInt(2, note.getVersion());
-            ps.setTimestamp(3, Timestamp.from(note.getUpdatedAt()));
-            ps.setObject(4, note.getId());
-            ps.executeUpdate();
-            return note;
+    /**
+     * Optimistic locking: UPDATE warunkowy na WHERE version = ?, version inkrementowana atomowo
+     * w tym samym zapytaniu. Zwraca liczbę zmienionych wierszy (0 = konflikt, ktoś inny zapisał
+     * nowszą wersję) — NIE rzuca wyjątku, żeby wywołujący (NoteService, wewnątrz własnej
+     * transakcji) sam zdecydował o rollbacku.
+     */
+    public int updateWithVersionCheck(Connection con, UUID noteId, String contentPath, int nextVersion, int expectedVersion) {
+        String sql = "UPDATE note SET content_path = ?, version = ?, updated_at = ? WHERE id = ? AND version = ?";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, contentPath);
+            ps.setInt(2, nextVersion);
+            ps.setTimestamp(3, Timestamp.from(Instant.now()));
+            ps.setObject(4, noteId);
+            ps.setInt(5, expectedVersion);
+            return ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to update note", e);
         }

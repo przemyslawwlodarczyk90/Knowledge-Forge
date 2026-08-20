@@ -1,0 +1,315 @@
+================================================================================
+Knowledge-Forge — Backup i przywracanie bazy danych
+================================================================================
+
+1. CO OBEJMUJE BACKUP
+--------------------------------------------------------------------------------
+Backup obejmuje CAŁĄ bazę PostgreSQL, w tym:
+  - użytkowników,
+  - kategorie,
+  - tematy,
+  - notatki (metadane — treść notatek leży na dysku, zob. notes.storage.path),
+  - metadane załączników (nazwa, rozmiar, typ, checksuma, opis),
+  - relacje temat <-> załącznik,
+  - względne ścieżki do fizycznych plików załączników (relative_path).
+
+Backup jest tworzony narzędziem "pg_dump -Fc" (format custom PostgreSQL — binarny,
+skompresowany, czytany przez pg_restore).
+
+
+2. CZEGO BACKUP NIE OBEJMUJE
+--------------------------------------------------------------------------------
+Backup NIE obejmuje fizycznych plików z katalogu attachments.storage.path
+(pliki załączników: nagrania MP4, arkusze, dokumenty, archiwa, obrazy, ...).
+Baza trzyma tylko ich metadane i względną ścieżkę — same bajty plików leżą
+osobno na dysku i backup bazy ich NIE kopiuje.
+
+Backup NIE obejmuje treści notatek (.kfdoc) z katalogu notes.storage.path —
+to osobny mechanizm, sprzed tej funkcji, rządzący się tą samą zasadą
+("baza trzyma tylko ścieżkę").
+
+
+3. OSTRZEŻENIE
+--------------------------------------------------------------------------------
+  * Usunięcie lub awaria dysku, na którym leży katalog załączników
+    (attachments.storage.path), oznacza TRWAŁĄ UTRATĘ tych plików —
+    backup bazy danych ich nie odtworzy.
+  * Przywrócenie bazy (restore) NIE odtwarza usuniętych/utraconych plików
+    fizycznych. Odtwarza wyłącznie rekordy w bazie (metadane i ścieżki).
+  * Osobno zabezpieczaj katalog attachments.storage.path (np. kopia na inny
+    dysk/wolumen, replikacja, backup na poziomie systemu plików) — backup
+    opisany w tym dokumencie tego NIE robi.
+
+
+4. LOKALIZACJA KATALOGU BACKUPÓW
+--------------------------------------------------------------------------------
+Domyślnie: ./data/database-backups (względem katalogu, z którego uruchomiono
+"java -jar knowledge-forge.jar"). Konfigurowalne przez:
+  backup.directory=./data/database-backups
+  (zmienna środowiskowa: BACKUP_DIRECTORY)
+
+Katalog jest tworzony automatycznie przy starcie aplikacji, jeśli nie istnieje.
+Jeśli jego utworzenie jest niemożliwe (np. brak uprawnień), aplikacja loguje
+jednoznaczny błąd i PRZERYWA uruchamianie — nie działa "częściowo" bez backupów.
+
+
+5. LOKALIZACJA KATALOGU ZAŁĄCZNIKÓW
+--------------------------------------------------------------------------------
+Domyślnie: ./data/attachments (względem katalogu uruchomienia). Konfigurowalne przez:
+  attachments.storage.path=./data/attachments
+  (zmienna środowiskowa: ATTACHMENTS_STORAGE_PATH)
+
+Maksymalny rozmiar pojedynczego pliku: attachments.max-file-size-mb (domyślnie 100 MB,
+zmienna: ATTACHMENTS_MAX_FILE_SIZE_MB). Ten katalog również jest tworzony automatycznie
+przy starcie — jeśli się nie da, start aplikacji jest przerywany z jednoznacznym błędem
+w logach.
+
+
+6. FORMAT I NAZEWNICTWO BACKUPÓW
+--------------------------------------------------------------------------------
+Nazwa pliku:
+  knowledge-forge_YYYY-MM-DD_HH-mm-ss.dump
+
+Przykład:
+  knowledge-forge_2026-08-20_02-00-00.dump
+
+Godzina/minuta w nazwie to lokalny czas serwera w momencie utworzenia backupu.
+Backup jest najpierw zapisywany jako "<nazwa>.dump.part" i dopiero po poprawnym
+zakończeniu pg_dump (exit code 0 + niepusty plik wynikowy) atomowo przenoszony
+na docelową nazwę "<nazwa>.dump". Niekompletny plik ".part" nigdy nie jest
+traktowany jako poprawny backup.
+
+
+7. AUTOMATYCZNY BACKUP RAZ DZIENNIE
+--------------------------------------------------------------------------------
+Backup wykonuje się automatycznie raz dziennie o godzinie z konfiguracji:
+  backup.enabled=true               (BACKUP_ENABLED)
+  backup.schedule-hour=2            (BACKUP_SCHEDULE_HOUR, 0-23)
+  backup.schedule-minute=0          (BACKUP_SCHEDULE_MINUTE, 0-59)
+
+Harmonogram liczy czas do najbliższego wystąpienia tej godziny w LOKALNEJ
+strefie czasowej serwera (nie UTC) i planuje zadanie na nowo każdego dnia —
+odporne na zmiany czasu letni/zimowy. Backup nie wykona się, jeśli w danym
+momencie trwa już inny backup albo restore (zob. punkt 9) — zostanie
+pominięty z jednoznacznym logiem, a harmonogram i tak przesunie się na
+kolejny dzień.
+
+
+8. RETENCJA — 14 DNI
+--------------------------------------------------------------------------------
+  backup.retention-days=14          (BACKUP_RETENTION_DAYS)
+
+Każdy dzień ma osobny plik .dump — nic nie jest nadpisywane. Po każdym
+POPRAWNIE utworzonym nowym backupie aplikacja usuwa kompletne pliki .dump
+starsze niż backup.retention-days, z wyjątkiem:
+  - najnowszego backupu (nigdy nie jest usuwany, nawet jeśli jest starszy
+    niż limit retencji — np. po dłuższej przerwie w działaniu aplikacji),
+  - plików spoza katalogu backupów,
+  - plików o nazwie niepasującej dokładnie do wzorca z punktu 6 (a więc
+    też nigdy plików ".dump.part" — te nie pasują do wzorca w ogóle),
+  - retencja NIE uruchamia się, dopóki nowy backup nie zostanie poprawnie
+    utworzony (a więc nie usunie niczego przy nieudanym backupie).
+
+Retencja NIGDY nie usuwa plików załączników z attachments.storage.path.
+
+
+9. WYMAGANIA
+--------------------------------------------------------------------------------
+  - Zainstalowane w systemie narzędzia pg_dump i pg_restore (pakiet
+    "postgresql-client" na większości dystrybucji Linuksa, albo dowolna
+    instalacja PostgreSQL zawierająca narzędzia klienckie).
+  - Wersja pg_dump/pg_restore zgodna z wersją serwera PostgreSQL (zalecana:
+    ta sama główna wersja; nowszy klient zwykle potrafi dumpować starszy
+    serwer, ale nie odwrotnie).
+  - Prawa zapisu do katalogu backup.directory oraz do katalogu tymczasowego
+    używanego przy uploadzie załączników.
+  - Ścieżki do binarek konfigurowalne przez:
+      backup.pg-dump-path=pg_dump       (BACKUP_PG_DUMP_PATH)
+      backup.pg-restore-path=pg_restore (BACKUP_PG_RESTORE_PATH)
+    Domyślnie zakładają, że są dostępne na PATH.
+
+
+10. RĘCZNE WYKONANIE BACKUPU (z terminala, niezależnie od aplikacji)
+--------------------------------------------------------------------------------
+  PGPASSWORD=<haslo_z_db.password> pg_dump \
+      -h <host_z_db.url> -p <port_z_db.url> -U <db.username> -d <nazwa_bazy> \
+      -Fc -f knowledge-forge_$(date +%Y-%m-%d_%H-%M-%S).dump
+
+Plik wynikowy możesz ręcznie umieścić w katalogu backup.directory, żeby był
+widoczny dla GET /api/admin/backups i mógł posłużyć jako backupFile przy
+restore przez sekretny endpoint (zob. punkt 12).
+
+
+11. RĘCZNY RESTORE Z TERMINALA (poza aplikacją)
+--------------------------------------------------------------------------------
+UWAGA: to bezpośrednio nadpisuje bazę docelową (--clean usuwa istniejące
+obiekty przed odtworzeniem). Wykonuj WYŁĄCZNIE na bazie, którą naprawdę
+chcesz przywrócić — najlepiej po zatrzymaniu aplikacji (zob. punkt 18).
+
+  PGPASSWORD=<haslo> pg_restore \
+      -h <host> -p <port> -U <db.username> -d <nazwa_bazy> \
+      --clean --if-exists --no-owner \
+      knowledge-forge_2026-08-19_02-00-00.dump
+
+Sprawdzenie zawartości pliku PRZED restore, bez dotykania żadnej bazy:
+  pg_restore --list knowledge-forge_2026-08-19_02-00-00.dump
+
+
+12. SEKRETNY ENDPOINT RESTORE — jak używać przez curl
+--------------------------------------------------------------------------------
+Endpoint (opisany szczegółowo w punktach 13-16 poniżej):
+  POST http://127.0.0.1:<server.port>/api/admin/backups/restore
+
+Przykład (użyj PRAWDZIWEGO sekretu zamiast placeholdera <RESTORE_SECRET>):
+
+  curl -X POST http://127.0.0.1:8081/api/admin/backups/restore \
+      -H "Content-Type: application/json" \
+      -H "X-Restore-Secret: <RESTORE_SECRET>" \
+      -d '{
+            "backupFile": "knowledge-forge_2026-08-19_02-00-00.dump",
+            "confirmation": "RESTORE KNOWLEDGE-FORGE"
+          }'
+
+Opcjonalna lista dostępnych backupów (te same zabezpieczenia co restore):
+
+  curl http://127.0.0.1:8081/api/admin/backups \
+      -H "X-Restore-Secret: <RESTORE_SECRET>"
+
+NIGDY nie wpisuj prawdziwego sekretu do dokumentacji, komentarzy w kodzie
+ani systemów kontroli wersji.
+
+
+13. ENDPOINT JEST DOMYŚLNIE WYŁĄCZONY
+--------------------------------------------------------------------------------
+Dopóki backup.restore.enabled=false (wartość domyślna), CAŁA ścieżka
+/api/admin/backups/* zwraca 404 — nieodróżnialne od trasy, która w ogóle
+nie istnieje. To świadomy wybór: brak informacji dla nieautoryzowanego
+klienta, że taki mechanizm w ogóle jest dostępny do włączenia.
+
+
+14. WŁĄCZENIE ENDPOINTU RESTORE
+--------------------------------------------------------------------------------
+Wymagane DWIE zmienne środowiskowe (nie ustawiaj sekretu w config.properties —
+plik w repozytorium celowo zawiera pustą wartość backup.restore.secret; pusty
+sekret CAŁKOWICIE blokuje endpoint, niezależnie od backup.restore.enabled):
+
+  BACKUP_RESTORE_ENABLED=true
+  BACKUP_RESTORE_SECRET=<długi, losowy, unikalny sekret — wygenerowany np. przez
+                          `openssl rand -hex 32`, trzymany WYŁĄCZNIE lokalnie>
+
+Włączaj tylko wtedy, gdy naprawdę planujesz użyć restore — nie zostawiaj
+włączonego na stałe na środowisku dostępnym z zewnątrz.
+
+
+15. ENDPOINT DZIAŁA WYŁĄCZNIE LOKALNIE
+--------------------------------------------------------------------------------
+Żądania są akceptowane WYŁĄCZNIE z loopbacku (127.0.0.1 / ::1) — sprawdzane
+po realnym adresie połączenia TCP, nigdy po nagłówku X-Forwarded-For (aplikacja
+nie ma skonfigurowanego zaufanego reverse proxy). Jeśli potrzebujesz wywołać
+endpoint zdalnie, zrób to przez bezpieczny tunel (np. SSH port forwarding)
+na sam serwer — nigdy przez otwarcie portu aplikacji na świat w tym celu.
+
+Dodatkowo wymagany jest poprawny nagłówek X-Restore-Secret, porównywany
+w sposób odporny na timing attack (MessageDigest.isEqual).
+
+
+16. WYMAGANE BODY JSON I CONFIRMATION
+--------------------------------------------------------------------------------
+  {
+    "backupFile": "knowledge-forge_YYYY-MM-DD_HH-mm-ss.dump",
+    "confirmation": "RESTORE KNOWLEDGE-FORGE"
+  }
+
+  - backupFile musi dokładnie pasować do wzorca nazwy z punktu 6 i wskazywać
+    na plik faktycznie istniejący w backup.directory (żadnych innych ścieżek —
+    nazwa jest zawsze rozwiązywana WEWNĄTRZ backup.directory, z weryfikacją
+    przez normalize() że wynik nie wychodzi poza ten katalog).
+  - confirmation musi być DOKŁADNIE równe "RESTORE KNOWLEDGE-FORGE" —
+    inna wartość albo brak pola zwraca 400 i restore się nie wykonuje.
+
+
+17. CZY PO RESTORE WYMAGANY JEST RESTART APLIKACJI?
+--------------------------------------------------------------------------------
+ZALEŻY OD WYNIKU — odpowiedź HTTP zawsze jednoznacznie o tym informuje
+(pole "restartRequired" w JSON-ie odpowiedzi):
+
+  * Zwykle NIE. Endpoint próbuje bezpiecznie odzyskać połączenia z bazą po
+    pg_restore: zawiesza pulę HikariCP (żeby żadne trzymane połączenie nie
+    kolidowało z --clean), wykonuje pg_restore, wznawia pulę i weryfikuje ją
+    zapytaniem SELECT 1. Jeśli to się powiedzie — restore kończy się
+    sukcesem, aplikacja jest w pełni sprawna, restart NIE jest potrzebny
+    ("restartRequired": false).
+
+  * TAK, jeśli walidacja połączeń po restore się nie powiedzie. Aplikacja
+    NIE udaje wtedy, że wszystko jest w porządku — trwale przechodzi w stan
+    "wymagany restart": WSZYSTKIE kolejne żądania HTTP (także odczyty)
+    zwracają 503, dopóki proces nie zostanie ręcznie zrestartowany.
+    Odpowiedź na samo żądanie restore ma wtedy "restartRequired": true,
+    a w logach pojawia się jednoznaczny komunikat SEVERE.
+
+W obu przypadkach restore jest przed wykonaniem poprzedzony:
+  - wejściem w tryb konserwacji (nowe żądania modyfikujące dane dostają 503,
+    zaplanowany backup jest wstrzymywany na czas operacji),
+  - odczekaniem (z timeoutem) na zakończenie żądań już w trakcie,
+  - AWARYJNYM backupem obecnej bazy (jeśli się nie powiedzie, restore jest
+    przerywany i baza pozostaje nietknięta).
+
+
+18. PROCEDURA AWARYJNA — pełne, ręczne przywrócenie bazy
+--------------------------------------------------------------------------------
+Zalecana, gdy trzeba odtworzyć bazę "z zimna", bez polegania na endpointzie
+HTTP (np. sama aplikacja się nie uruchamia):
+
+  1. Zatrzymaj aplikację (żeby żadne połączenie nie kolidowało z restore).
+  2. Wykonaj dodatkowy pg_dump obecnego stanu bazy (nawet jeśli wygląda na
+     uszkodzony) — na wszelki wypadek, zanim cokolwiek nadpiszesz.
+  3. Wybierz właściwy plik .dump z katalogu backup.directory (sprawdź datę
+     w nazwie; `pg_restore --list <plik>` pokaże zawartość bez dotykania bazy).
+  4. Wykonaj pg_restore zgodnie z punktem 11.
+  5. Uruchom aplikację.
+  6. Sprawdź logi startowe — Schema.ensure() musi zakończyć się bez błędów,
+     a AttachmentDiagnosticsService zaloguje raport spójności baza<->dysk.
+  7. Uruchom diagnostykę powiązań załączników (patrz punkt 19) i przejrzyj
+     jej wynik w logach.
+
+
+19. PLIKI OSIEROCONE PO PRZYWRÓCENIU STARSZEJ BAZY
+--------------------------------------------------------------------------------
+Ponieważ backup NIE obejmuje katalogu attachments.storage.path (punkt 2),
+po przywróceniu starszej bazy mogą wystąpić dwa rodzaje niespójności:
+
+  a) Rekordy attachment w przywróconej bazie wskazujące na pliki, które od
+     tamtej pory zostały skasowane z dysku (np. przez usunięcie załącznika
+     PO dacie backupu, zanim baza została przywrócona do stanu SPRZED tego
+     usunięcia) — w bazie jest rekord, ale pliku już nie ma.
+
+  b) Pliki na dysku dodane PO dacie backupu, których rekordów już nie ma
+     w przywróconej (starszej) bazie — plik istnieje, ale baza o nim nie wie.
+
+To OCZEKIWANE zachowanie, wynikające wprost z tego, że backup obejmuje tylko
+bazę. Aplikacja NIGDY automatycznie nie usuwa ani plików, ani rekordów w
+takiej sytuacji — do tego służy diagnostyka opisana w punkcie 20, która
+WYŁĄCZNIE raportuje niespójności do logów, zostawiając decyzję (co zrobić
+z osieroconymi plikami/rekordami) administratorowi.
+
+
+20. JAK SPRAWDZIĆ, CZY BACKUP JEST RZECZYWIŚCIE POPRAWNY
+--------------------------------------------------------------------------------
+  1. Rozmiar pliku .dump > 0 bajtów (pusty/niekompletny plik nigdy nie ma
+     rozszerzenia .dump — leży jako .dump.part, dopóki pg_dump się nie
+     zakończy poprawnie; aplikacja sama tego pilnuje przy backupie
+     automatycznym).
+  2. `pg_restore --list <plik>.dump` — czyta wyłącznie nagłówek/spis treści
+     archiwum, bez dotykania jakiejkolwiek bazy danych. Jeśli zwraca listę
+     obiektów (tabel, sekwencji, indeksów...) bez błędu — plik jest
+     strukturalnie poprawnym archiwum custom-format.
+  3. Docelowy test (zalecany okresowo, NIGDY na bazie roboczej): pełny
+     pg_restore na osobnej, jednorazowej bazie testowej, a potem porównanie
+     kluczowych liczności (np. SELECT COUNT(*) FROM topic;) z tym, czego
+     się spodziewasz.
+
+--------------------------------------------------------------------------------
+Diagnostyka spójności baza<->dysk dla załączników uruchamia się automatycznie
+przy każdym starcie aplikacji (log na poziomie INFO/WARNING) i wyłącznie
+RAPORTUJE — nigdy nie usuwa rekordów ani plików.
+================================================================================

@@ -8,6 +8,9 @@ public record UpdateTopicRequest(
         String shortPrompt,
         String author,
         DetailLevel detailLevel,
-        TopicType type
+        TopicType type,
+        /** Optimistic locking — TopicDto.version, na której użytkownik zaczął edycję. Gdy null,
+         *  update jest bezwarunkowy (starsi/wewnętrzni wywołujący) — nowy frontend zawsze go wysyła. */
+        Integer expectedVersion
 ) {
 }

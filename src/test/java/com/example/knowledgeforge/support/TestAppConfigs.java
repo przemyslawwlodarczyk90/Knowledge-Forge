@@ -1,0 +1,28 @@
+package com.example.knowledgeforge.support;
+
+import com.example.knowledgeforge.config.AppConfig;
+
+import java.nio.file.Path;
+import java.util.Properties;
+
+public final class TestAppConfigs {
+
+    private TestAppConfigs() {
+    }
+
+    public static AppConfig withBackupDir(Path backupDir, int retentionDays) {
+        Properties props = new Properties();
+        props.setProperty("db.url", "jdbc:postgresql://localhost:5432/pgDB");
+        props.setProperty("db.username", "user");
+        props.setProperty("db.password", "password");
+        props.setProperty("backup.directory", backupDir.toString());
+        props.setProperty("backup.retention-days", String.valueOf(retentionDays));
+        props.setProperty("backup.pg-dump-path", "pg_dump");
+        props.setProperty("backup.pg-restore-path", "pg_restore");
+        return AppConfig.fromProperties(props);
+    }
+
+    public static AppConfig withBackupDir(Path backupDir) {
+        return withBackupDir(backupDir, 14);
+    }
+}

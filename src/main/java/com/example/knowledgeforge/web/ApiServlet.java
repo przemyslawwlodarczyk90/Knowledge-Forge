@@ -3,6 +3,7 @@ package com.example.knowledgeforge.web;
 import com.example.knowledgeforge.domain.exception.ConflictException;
 import com.example.knowledgeforge.domain.exception.ForbiddenException;
 import com.example.knowledgeforge.domain.exception.NotFoundException;
+import com.example.knowledgeforge.domain.exception.PayloadTooLargeException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.json.JsonMapper;
 import jakarta.servlet.ServletException;
@@ -81,6 +82,8 @@ public abstract class ApiServlet extends HttpServlet {
             writeError(resp, 404, e.getMessage());
         } catch (ConflictException e) {
             writeError(resp, 409, e.getMessage());
+        } catch (PayloadTooLargeException e) {
+            writeError(resp, 413, e.getMessage());
         } catch (ForbiddenException e) {
             writeError(resp, 403, e.getMessage());
         } catch (ValidationException e) {
@@ -137,5 +140,25 @@ public abstract class ApiServlet extends HttpServlet {
         } catch (IllegalArgumentException e) {
             throw new ValidationException("Invalid id: " + value);
         }
+    }
+
+    /** Załączniki mają id BIGSERIAL (Long), nie UUID jak reszta encji. */
+    protected Long parseLong(String value) {
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException e) {
+            throw new ValidationException("Invalid id: " + value);
+        }
+    }
+
+    /**
+     * Identyfikator karty przeglądarki (sessionStorage po stronie frontendu) — pozwala karcie,
+     * która sama wykonała operację, rozpoznać i zignorować własne zdarzenie WebSocket
+     * (zob. ws.ApplicationEventHub, WsEvent#sourceClientId). Brak nagłówka = null (starszy/
+     * nieprzeglądarkowy klient) — zdarzenie i tak zostanie rozgłoszone, po prostu bez dopasowania.
+     */
+    protected String clientId(HttpServletRequest req) {
+        String value = req.getHeader("X-Client-Id");
+        return (value == null || value.isBlank()) ? null : value;
     }
 }

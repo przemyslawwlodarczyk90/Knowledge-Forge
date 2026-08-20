@@ -16,6 +16,8 @@ public class Topic {
     private TopicStatus status = TopicStatus.NEW;
     private Instant createdAt;
     private Instant updatedAt;
+    /** Optimistic locking — zob. TopicDao#update / TopicDao#updateStatus. */
+    private Integer version = 1;
 
     public Topic() {
     }
@@ -52,4 +54,7 @@ public class Topic {
 
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+
+    public Integer getVersion() { return version; }
+    public void setVersion(Integer version) { this.version = version; }
 }

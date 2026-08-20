@@ -26,6 +26,11 @@ public class AppConfig {
         return new AppConfig(props);
     }
 
+    /** Buduje AppConfig z gotowych Properties, z pominięciem odczytu z classpath — używane przez testy. */
+    public static AppConfig fromProperties(Properties props) {
+        return new AppConfig(props);
+    }
+
     private static void loadInto(Properties props, String resource, boolean required) {
         try (InputStream in = AppConfig.class.getResourceAsStream(resource)) {
             if (in == null) {
@@ -81,5 +86,75 @@ public class AppConfig {
     /** Włącza szczegółowe logi (FINE) z pakietu aplikacji — domyślnie włączone, wyłącz w prod przez DEBUG_LOGGING=false. */
     public boolean debugLogging() {
         return Boolean.parseBoolean(get("debug.logging", "true"));
+    }
+
+    // ===============================
+    // ZAŁĄCZNIKI — pliki na dysku, baza trzyma tylko metadane + względną ścieżkę
+    // ===============================
+
+    /** Folder na dysku, gdzie leżą fizyczne pliki załączników (zob. storage.AttachmentStorage). */
+    public String attachmentsStoragePath() {
+        return get("attachments.storage.path", "./data/attachments");
+    }
+
+    /** Maksymalny rozmiar pojedynczego załącznika w MB — egzekwowany zarówno przez Jetty, jak i strumieniowo w AttachmentStorage. */
+    public long attachmentsMaxFileSizeMb() {
+        return Long.parseLong(get("attachments.max-file-size-mb", "100"));
+    }
+
+    // ===============================
+    // BACKUP BAZY POSTGRESQL (pg_dump -Fc) — bez backupu plików załączników
+    // ===============================
+
+    public boolean backupEnabled() {
+        return Boolean.parseBoolean(get("backup.enabled", "true"));
+    }
+
+    /** Folder na dysku, gdzie lądują pliki .dump (i tymczasowe .dump.part w trakcie tworzenia). */
+    public String backupDirectory() {
+        return get("backup.directory", "./data/database-backups");
+    }
+
+    public int backupRetentionDays() {
+        return Integer.parseInt(get("backup.retention-days", "14"));
+    }
+
+    /** Godzina (0-23) codziennego automatycznego backupu, w lokalnej strefie czasowej. */
+    public int backupScheduleHour() {
+        return Integer.parseInt(get("backup.schedule-hour", "2"));
+    }
+
+    /** Minuta (0-59) codziennego automatycznego backupu, w lokalnej strefie czasowej. */
+    public int backupScheduleMinute() {
+        return Integer.parseInt(get("backup.schedule-minute", "0"));
+    }
+
+    /** Ścieżka do binarki pg_dump — domyślnie zakłada, że jest na PATH. */
+    public String backupPgDumpPath() {
+        return get("backup.pg-dump-path", "pg_dump");
+    }
+
+    /** Ścieżka do binarki pg_restore — domyślnie zakłada, że jest na PATH. */
+    public String backupPgRestorePath() {
+        return get("backup.pg-restore-path", "pg_restore");
+    }
+
+    // ===============================
+    // ADMINISTRACYJNY ENDPOINT RESTORE — domyślnie WYŁĄCZONY
+    // ===============================
+
+    /** Musi być jawnie ustawione na true (BACKUP_RESTORE_ENABLED), inaczej /api/admin/backups/* zwraca 404. */
+    public boolean backupRestoreEnabled() {
+        return Boolean.parseBoolean(get("backup.restore.enabled", "false"));
+    }
+
+    /**
+     * Sekret wymagany w nagłówku X-Restore-Secret. CELOWO puste domyślnie — pusty sekret
+     * całkowicie blokuje endpoint (zob. AdminBackupServlet), więc nigdy nie trzymamy tu
+     * prawdziwej wartości w repozytorium. Produkcyjny sekret ma pochodzić WYŁĄCZNIE
+     * ze zmiennej środowiskowej BACKUP_RESTORE_SECRET.
+     */
+    public String backupRestoreSecret() {
+        return get("backup.restore.secret", "");
     }
 }

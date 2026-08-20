@@ -1,5 +1,6 @@
 package com.example.knowledgeforge.dao;
 
+import com.example.knowledgeforge.domain.exception.ConflictException;
 import com.example.knowledgeforge.domain.topic.DetailLevel;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.domain.topic.TopicStatus;
@@ -32,9 +33,17 @@ public class TopicDao {
     }
 
     public Optional<Topic> findByIdAndUserId(UUID id, Long userId) {
+        try (Connection con = dataSource.getConnection()) {
+            return findByIdAndUserId(con, id, userId);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to query topic by id", e);
+        }
+    }
+
+    /** Wariant na przekazanym połączeniu — do użycia wewnątrz szerszej transakcji (zob. NoteService#save). */
+    public Optional<Topic> findByIdAndUserId(Connection con, UUID id, Long userId) {
         String sql = "SELECT * FROM topic WHERE id = ? AND user_id = ?";
-        try (Connection con = dataSource.getConnection();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setObject(1, id);
             ps.setLong(2, userId);
             try (ResultSet rs = ps.executeQuery()) {
@@ -95,6 +104,28 @@ public class TopicDao {
         }
     }
 
+    /**
+     * Bezpośrednia (bez podkategorii) liczba tematów pojedynczej kategorii — liczona przez
+     * SELECT COUNT(*) w TEJ SAMEJ transakcji co insert nowego tematu (zob. TopicService#create),
+     * więc od razu widzi własny, jeszcze niezacommitowany wiersz (ta sama sesja/transakcja).
+     * To jedyne poprawne źródło "aktualnego licznika z bazy" po utworzeniu tematu — bez wyścigu
+     * między "SELECT count" a "UPDATE count = count + 1" na współdzielonym liczniku (żadnego
+     * takiego liczonika tu nie ma — COUNT(*) na tabeli topic jest zawsze źródłem prawdy).
+     */
+    public int countDirectByCategoryId(Connection con, UUID categoryId, Long userId) {
+        String sql = "SELECT COUNT(*) FROM topic WHERE user_id = ? AND category_id = ?";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setLong(1, userId);
+            ps.setObject(2, categoryId);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count topics in category", e);
+        }
+    }
+
     /** Liczba tematów niskiego poziomu szczegółowości na kategorię (bezpośrednio w niej, bez podkategorii) —
      *  te tematy są domyślnie ukryte w drzewie, więc licznik w UI musi je umieć odjąć od sumy. */
     public Map<UUID, Integer> countLowDetailByCategoryForUser(Long userId) {
@@ -146,18 +177,27 @@ public class TopicDao {
     }
 
     public Topic insert(Topic topic) {
+        try (Connection con = dataSource.getConnection()) {
+            return insert(con, topic);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to insert topic", e);
+        }
+    }
+
+    /** Wariant na przekazanym połączeniu — do użycia wewnątrz szerszej transakcji (zob. TopicService#create). */
+    public Topic insert(Connection con, Topic topic) {
         if (topic.getId() == null) topic.setId(UUID.randomUUID());
         Instant now = Instant.now();
         topic.setCreatedAt(now);
         topic.setUpdatedAt(now);
         if (topic.getStatus() == null) topic.setStatus(TopicStatus.NEW);
+        if (topic.getVersion() == null) topic.setVersion(1);
 
         String sql = """
-                INSERT INTO topic (id, user_id, category_id, title, short_prompt, author, detail_level, type, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO topic (id, user_id, category_id, title, short_prompt, author, detail_level, type, status, created_at, updated_at, version)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
-        try (Connection con = dataSource.getConnection();
-             PreparedStatement ps = con.prepareStatement(sql)) {
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setObject(1, topic.getId());
             ps.setLong(2, topic.getUserId());
             ps.setObject(3, topic.getCategoryId());
@@ -169,6 +209,7 @@ public class TopicDao {
             ps.setString(9, topic.getStatus().name());
             ps.setTimestamp(10, Timestamp.from(topic.getCreatedAt()));
             ps.setTimestamp(11, Timestamp.from(topic.getUpdatedAt()));
+            ps.setInt(12, topic.getVersion());
             ps.executeUpdate();
             log.fine(() -> "Inserted topic " + topic.getId());
             return topic;
@@ -178,12 +219,21 @@ public class TopicDao {
         }
     }
 
-    public Topic update(Topic topic) {
+    /**
+     * Optimistic locking: gdy expectedVersion != null, aktualizacja jest warunkowa
+     * (WHERE version = ?) i version jest atomowo inkrementowana w tym samym UPDATE.
+     * 0 zmienionych wierszy = ktoś inny zapisał nowszą wersję w międzyczasie -> ConflictException (409).
+     * expectedVersion == null = wywołanie bezwarunkowe (zgodność wsteczna) — version i tak rośnie.
+     */
+    public Topic update(Topic topic, Integer expectedVersion) {
         topic.setUpdatedAt(Instant.now());
-        String sql = """
-                UPDATE topic SET title = ?, short_prompt = ?, author = ?, detail_level = ?, type = ?, status = ?, updated_at = ?
+        String base = """
+                UPDATE topic SET title = ?, short_prompt = ?, author = ?, detail_level = ?, type = ?, status = ?,
+                                  updated_at = ?, version = version + 1
                 WHERE id = ?
                 """;
+        String sql = expectedVersion != null ? base + " AND version = ?" : base;
+
         try (Connection con = dataSource.getConnection();
              PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setString(1, topic.getTitle());
@@ -194,12 +244,40 @@ public class TopicDao {
             ps.setString(6, topic.getStatus().name());
             ps.setTimestamp(7, Timestamp.from(topic.getUpdatedAt()));
             ps.setObject(8, topic.getId());
-            ps.executeUpdate();
-            log.fine(() -> "Updated topic " + topic.getId());
+            if (expectedVersion != null) {
+                ps.setInt(9, expectedVersion);
+            }
+            int affected = ps.executeUpdate();
+            if (affected == 0) {
+                log.warning(() -> "Optimistic lock conflict updating topic " + topic.getId()
+                        + " (expectedVersion=" + expectedVersion + ")");
+                throw new ConflictException("Topic was modified by someone else in the meantime");
+            }
+            topic.setVersion(expectedVersion != null ? expectedVersion + 1 : topic.getVersion() + 1);
+            log.fine(() -> "Updated topic " + topic.getId() + " -> version=" + topic.getVersion());
             return topic;
         } catch (SQLException e) {
             log.log(Level.SEVERE, "Failed to update topic " + topic.getId(), e);
             throw new RuntimeException("Failed to update topic", e);
+        }
+    }
+
+    /**
+     * Wąski, wewnętrzny update statusu (np. NEW -> NOTE_ADDED po pierwszym zapisie notatki) —
+     * na przekazanym połączeniu, wewnątrz cudzej transakcji (zob. NoteService#save). Zwraca
+     * liczbę zmienionych wierszy zamiast rzucać wyjątek — wywołujący decyduje, czy zrobić rollback
+     * całej (szerszej) transakcji.
+     */
+    public int updateStatus(Connection con, UUID topicId, TopicStatus status, int expectedVersion) {
+        String sql = "UPDATE topic SET status = ?, updated_at = ?, version = version + 1 WHERE id = ? AND version = ?";
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, status.name());
+            ps.setTimestamp(2, Timestamp.from(Instant.now()));
+            ps.setObject(3, topicId);
+            ps.setInt(4, expectedVersion);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to update topic status", e);
         }
     }
 
@@ -227,6 +305,7 @@ public class TopicDao {
         topic.setStatus(TopicStatus.valueOf(rs.getString("status")));
         topic.setCreatedAt(rs.getTimestamp("created_at").toInstant());
         topic.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
+        topic.setVersion(rs.getInt("version"));
         return topic;
     }
 }
