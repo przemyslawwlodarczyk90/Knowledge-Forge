@@ -1,0 +1,230 @@
+================================================================================
+Knowledge-Forge — Format danych: co, gdzie i w jakiej postaci jest zapisywane
+================================================================================
+
+Ten dokument opisuje WSZYSTKIE miejsca, w których aplikacja trwale zapisuje
+dane, i DOKŁADNY format każdego z nich — tabele w bazie, pliki na dysku,
+formaty kontenerów. To referencja "co jest w środku", NIE instrukcja
+backupu/przywracania (zob. dokumentacja/BACKUP_STRATEGY.txt i
+dokumentacja/BACKUP_AND_RESTORE.txt — te dwa dokumenty opisują HARMONOGRAMY
+i PROCEDURY, ten opisuje wyłącznie SAM FORMAT danych).
+
+Cztery miejsca przechowywania danych:
+  1. Baza PostgreSQL       — rekordy/metadane (kto, co, kiedy, gdzie leży).
+  2. Pliki .kfdoc          — treść JEDNEJ notatki/instrukcji, na dysku.
+  3. Pliki załączników     — surowe bajty załączonych plików, na dysku.
+  4. Plik .kfbundle        — zbiorczy backup wszystkich .kfdoc, na dysku.
+
+Zasada nadrzędna, powtarzająca się w całej aplikacji: baza trzyma WYŁĄCZNIE
+metadane i ścieżki — same "ciężkie" dane (treść notatki, bajty załącznika)
+leżą jako zwykłe pliki na dysku, nigdy jako kolumna BYTEA w bazie.
+
+
+1. BAZA POSTGRESQL — TABELE
+--------------------------------------------------------------------------------
+Schemat tworzony/migrowany automatycznie przy starcie (config.Schema, zob.
+tam pełną, aktualną listę instrukcji) — poniżej aktualny kształt tabel.
+
+1.1. users — konto (aplikacja działa bez logowania, jeden user domyślny)
+  id           BIGSERIAL PRIMARY KEY
+  username     TEXT NOT NULL UNIQUE
+  email        TEXT NOT NULL
+  active       BOOLEAN NOT NULL DEFAULT FALSE
+
+1.2. category_node — węzeł drzewa kategorii (kategoria/podkategoria)
+  id           UUID PRIMARY KEY
+  user_id      BIGINT NOT NULL REFERENCES users(id)
+  parent_id    UUID REFERENCES category_node(id)   -- NULL = korzeń drzewa
+  name         TEXT NOT NULL
+  position     INT NOT NULL DEFAULT 0               -- kolejność wśród rodzeństwa
+  root         BOOLEAN NOT NULL DEFAULT FALSE
+  created_at   TIMESTAMPTZ NOT NULL
+  updated_at   TIMESTAMPTZ NOT NULL
+
+1.3. topic — pojedynczy wpis w drzewie wiedzy (notatka albo instrukcja)
+  id                                    UUID PRIMARY KEY
+  user_id                               BIGINT NOT NULL REFERENCES users(id)
+  category_id                           UUID NOT NULL REFERENCES category_node(id)
+  title                                 TEXT NOT NULL
+  short_prompt                          TEXT
+  author                                TEXT
+  detail_level                          TEXT NOT NULL DEFAULT 'MEDIUM'   -- LOW/MEDIUM/HIGH
+  type                                  TEXT NOT NULL DEFAULT 'NOTE'     -- NOTE/INSTRUCTION
+  status                                TEXT NOT NULL DEFAULT 'NEW'      -- NEW/NOTE_ADDED
+  version                               INT NOT NULL DEFAULT 1           -- optimistic locking
+  actuality_verified                    BOOLEAN NOT NULL DEFAULT TRUE
+  last_verification_of_actuality_date   TIMESTAMPTZ
+  created_at                            TIMESTAMPTZ NOT NULL
+  updated_at                            TIMESTAMPTZ NOT NULL
+
+  Znaczenie actuality_verified / last_verification_of_actuality_date opisane
+  szczegółowo w dokumentacja/ACTUALITY_VERIFICATION.txt.
+
+1.4. note — TYLKO metadane treści notatki, sama treść leży na dysku (zob. 2.)
+  id             UUID PRIMARY KEY
+  user_id        BIGINT NOT NULL REFERENCES users(id)
+  topic_id       UUID NOT NULL UNIQUE REFERENCES topic(id)   -- 1 topic = najwyżej 1 note
+  content_path   TEXT              -- ścieżka do pliku .kfdoc na dysku (zob. 2.)
+  version        INT NOT NULL DEFAULT 1
+  created_at     TIMESTAMPTZ NOT NULL
+  updated_at     TIMESTAMPTZ NOT NULL
+
+  content_path wskazuje plik pod notes.storage.path (domyślnie ./data/notes) —
+  DOKŁADNIE jedna notatka na temat, nadpisywana przy każdym zapisie (nie
+  historia wersji). Kolumna jest jedynym łącznikiem między bazą a plikiem.
+
+1.5. attachment — metadane załączonego pliku, sam plik leży na dysku (zob. 3.)
+  id                BIGSERIAL PRIMARY KEY
+  topic_id          UUID NOT NULL REFERENCES topic(id) ON DELETE CASCADE
+  original_name     TEXT NOT NULL     -- nazwa, pod jaką użytkownik wgrał plik
+  stored_name       TEXT NOT NULL     -- rzeczywista nazwa pliku na dysku (zob. 3.)
+  relative_path     TEXT NOT NULL     -- ścieżka WZGLĘDEM attachments.storage.path
+  content_type      TEXT              -- MIME, jeśli rozpoznany
+  size_bytes        BIGINT NOT NULL
+  attachment_type   TEXT NOT NULL     -- klasyfikacja (dokument/obraz/nagranie/archiwum...)
+  description       TEXT
+  checksum_sha256   TEXT NOT NULL     -- suma kontrolna zapisanych bajtów
+  created_at        TIMESTAMPTZ NOT NULL
+
+
+2. PLIK .KFDOC — TREŚĆ JEDNEJ NOTATKI/INSTRUKCJI
+--------------------------------------------------------------------------------
+Lokalizacja: notes.storage.path/<topicId>.kfdoc (domyślnie ./data/notes).
+Realizacja: com.example.knowledgeforge.document.DocumentContainer.
+
+Format: zwykły kontener ZIP (java.util.zip, biblioteka standardowa) — da się
+otworzyć dowolnym archiwizatorem (Eksplorator Windows, 7-Zip, `unzip`), bez
+żadnego własnego narzędzia. W środku:
+
+  manifest.json
+      {
+        "format": "kfdoc",
+        "version": 1,
+        "metadata": {
+          "topicId": "...",
+          "noteId": "...",
+          "title": "...",
+          "shortPrompt": "...",
+          "author": "...",
+          "type": "NOTE" | "INSTRUCTION",
+          "detailLevel": "LOW" | "MEDIUM" | "HIGH",
+          "categoryId": "...",
+          "categoryName": "...",
+          "categoryPath": ["IT", "Java", "Kolekcje"],
+          "topicCreatedAt": "...",
+          "topicUpdatedAt": "...",
+          "noteCreatedAt": "...",
+          "noteVersion": 3,
+          "savedAt": "..."
+        }
+      }
+
+  content.json
+      Drzewo dokumentu edytora — format ProseMirror/TipTap JSON. Węzeł
+      najwyższego poziomu to zawsze {"type":"doc","content":[...]}, a jego
+      dzieci to bloki: paragraph, heading (attrs.level 1-3), bulletList/
+      orderedList (z listItem w środku), blockquote, codeBlock, image
+      (attrs.src). Tekst wewnątrz bloków to węzły {"type":"text","text":"..."}
+      (opcjonalnie z "marks": bold/italic/strike).
+
+  assets/<nazwa-pliku>
+      Obrazy wklejone bezpośrednio do treści (np. ze schowka) — surowe bajty
+      pliku PNG/JPEG. Referencjonowane z content.json przez
+      attrs.src = "asset:<nazwa-pliku>" (NIE base64 osadzone w JSON-ie).
+
+WAŻNE: .kfdoc zawiera WYŁĄCZNIE obrazy OSADZONE w treści notatki — pliki
+załączone osobno (przez sekcję "Załączniki") mają zupełnie inny mechanizm,
+zob. punkt 3.
+
+Plik jest NADPISYWANY przy każdym kolejnym zapisie treści (zapis atomowy —
+plik tymczasowy + ATOMIC_MOVE, zob. storage.NoteFileStorage) — nie jest to
+historia wersji, tylko jeden, aktualny stan. Pole "categoryPath" w manifeście
+jest OPCJONALNE z punktu widzenia odczytu — starsze pliki .kfdoc zapisane
+zanim to pole zostało dodane po prostu go nie mają, i to jest prawidłowe.
+
+
+3. PLIKI ZAŁĄCZNIKÓW
+--------------------------------------------------------------------------------
+Lokalizacja: attachments.storage.path/<rok>/<miesiąc>/<storedName>
+(domyślnie ./data/attachments), np.:
+
+  ./data/attachments/2026/08/3f6c1e2a-9b4d-4a11-9f2e-7b0c2a1d4e5f.pdf
+
+Realizacja: com.example.knowledgeforge.storage.AttachmentStorage.
+
+  - storedName = losowe UUID + oryginalne rozszerzenie pliku (nazwa na dysku
+    NIGDY nie jest oryginalną nazwą pliku od użytkownika — unika kolizji i
+    problemów ze znakami specjalnymi/ścieżkami);
+  - katalog <rok>/<miesiąc> to data UPLOADU (nie treści pliku) — trzyma
+    liczbę plików w jednym katalogu w rozsądnych granicach;
+  - zapis strumieniowy, najpierw jako "*.part" w tym samym katalogu, dopiero
+    po pełnym odebraniu i policzeniu sumy SHA-256 — ATOMIC_MOVE na docelową
+    nazwę (ten sam wzorzec bezpiecznego zapisu co .kfdoc i .kfbundle);
+  - oryginalna nazwa pliku (original_name), typ MIME, rozmiar i suma SHA-256
+    trafiają WYŁĄCZNIE do bazy (tabela attachment, zob. 1.5) — sam plik na
+    dysku nie niesie żadnych metadanych, jest surowymi bajtami.
+
+Maksymalny rozmiar pojedynczego pliku: attachments.max-file-size-mb
+(domyślnie 100 MB).
+
+
+4. PLIK .KFBUNDLE — ZBIORCZY BACKUP WSZYSTKICH .KFDOC
+--------------------------------------------------------------------------------
+Lokalizacja: note-bundle-backup.directory/knowledge-forge-notes-latest.kfbundle
+(domyślnie ./data/note-bundle-backups) — ZAWSZE dokładnie jeden plik, codziennie
+bezpiecznie nadpisywany (harmonogram i procedura opisane w
+dokumentacja/BACKUP_STRATEGY.txt — tu wyłącznie sam format).
+
+Realizacja: com.example.knowledgeforge.backup.NoteBundleBackupService.
+Też zwykły ZIP, budowany bezpośrednio ze skanu notes.storage.path (nie z bazy):
+
+  manifest.json
+      {
+        "format": "kfbundle",
+        "version": 1,
+        "createdAt": "2026-08-23T14:12:00.036453600Z",
+        "documentCount": 13,
+        "corruptedCount": 0,
+        "generator": "Knowledge Forge 2.0"
+      }
+
+  index.json
+      Tablica JSON, jeden wpis na każdy znaleziony plik .kfdoc, posortowana
+      stabilnie (ścieżka kategorii, typ, tytuł, topicId):
+        {
+          "fileName": "documents/<topicId>.kfdoc",
+          "topicId": "...", "noteId": "...",
+          "title": "...", "author": "...", "type": "...", "detailLevel": "...",
+          "categoryName": "...", "categoryPath": [...],
+          "savedAt": "...", "noteVersion": "...",
+          "sizeBytes": 689,
+          "sha256": "89d88397fcc5ed3211e1c8e136a35404459a8740a9be35186ac0c018e1b42893",
+          "corrupted": false,
+          "error": null
+        }
+      sha256 to suma kontrolna SUROWYCH bajtów danego pliku .kfdoc — służy do
+      weryfikacji integralności przy odczycie (panel ratunkowy, zob. 5.).
+      corrupted=true + wypełnione "error" oznacza plik .kfdoc, którego nie
+      dało się poprawnie odczytać w chwili tworzenia backupu — jego surowa
+      kopia i tak trafia do archiwum (documents/*), nic nie jest pomijane.
+
+  documents/<topicId>.kfdoc
+      Dokładna, surowa kopia każdego znalezionego pliku .kfdoc (format
+      identyczny jak w punkcie 2.) — jeden wpis na temat.
+
+
+5. GDZIE TE DANE SĄ ODCZYTYWANE PONOWNIE (dla kontekstu)
+--------------------------------------------------------------------------------
+  - note.content_path + .kfdoc  -> normalny widok/edycja notatki w aplikacji,
+    generator PDF pojedynczej notatki (Pobierz PDF w NotePanel).
+  - attachment + plik na dysku  -> sekcja "Załączniki" w NotePanel, pobieranie
+    przez /api/attachments/*.
+  - .kfbundle / .kfdoc          -> WYŁĄCZNIE panel "Wczytaj dane binarne"
+    (EmergencyRecoveryPanel) — awaryjny, lokalny odczyt w przeglądarce (bez
+    backendu/bazy), zamieniający treść z powrotem na PDF. Format .kfdoc i
+    .kfbundle jest tam parsowany niezależnie, po stronie JS
+    (frontend/src/utils/emergencyRecovery.js) — dokładnie wg struktury
+    opisanej w punktach 2. i 4. powyżej.
+  - baza (backup .dump)         -> pg_restore, zob. dokumentacja/BACKUP_AND_RESTORE.txt.
+
+================================================================================
