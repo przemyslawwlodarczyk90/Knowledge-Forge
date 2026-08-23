@@ -1,0 +1,296 @@
+================================================================================
+Knowledge-Forge — Wielowątkowość: gdzie i jak jest zrobiona
+================================================================================
+
+1. MODEL OGÓLNY — CO DZIAŁA NA JAKIM WĄTKU
+--------------------------------------------------------------------------------
+Aplikacja to zwykły Jetty (embedded, bez Spring/ORM) — Jetty obsługuje każde
+żądanie HTTP na wątku ze swojej wewnętrznej puli (domyślny QueuedThreadPool,
+bez ręcznego strojenia rozmiaru w Main.java). Oznacza to model
+"request-per-thread": jedno żądanie = jeden wątek od przyjęcia do wysłania
+odpowiedzi, ale RÓWNOLEGLE może być obsługiwanych wiele żądań na wielu takich
+wątkach naraz.
+
+Kluczowe: WSZYSTKIE serwisy/DAO/servlety są tworzone RAZ, w Main.java (korzeń
+kompozycji — ręczne "wstrzykiwanie zależności" przez konstruktory, żadnego
+kontenera IoC), i potem WSPÓŁDZIELONE przez wszystkie wątki żądań. To NIE jest
+model "bean per-request" ze Springa — jeśli jakiś serwis trzyma mutowalny stan
+w polu instancji, ten stan jest z definicji dzielony między wątkami i wymaga
+świadomej synchronizacji. W praktyce większość klas (TopicService, NoteDao,
+TopicServlet, ...) jest bezstanowa — same tylko wołają bazę/dysk przez
+przekazane zależności — więc nie potrzebują żadnej synchronizacji. Miejsca,
+które MAJĄ mutowalny stan współdzielony, są wymienione w punktach 2-8 poniżej;
+wszystkie są świadomie oznaczone w kodzie komentarzem `// MULTI-THREADING:`.
+
+Poza wątkami żądań HTTP aplikacja uruchamia garść WŁASNYCH wątków-demonów
+(schedulery, broadcast WS, heartbeat) — pełne zestawienie w punkcie 9.
+
+
+2. BAZA DANYCH — PULA POŁĄCZEŃ I TRANSAKCJE
+--------------------------------------------------------------------------------
+Pula połączeń JDBC to HikariCP (config/Database.java):
+  maximumPoolSize = 10, minimumIdle = 2, poolName = "knowledge-forge-pool".
+
+Każda operacja bazodanowa pożycza połączenie z puli (`dataSource.getConnection()`)
+i oddaje je z powrotem (try-with-resources / finally) — połączenia NIE są
+trzymane między żądaniami. Tam, gdzie operacja obejmuje więcej niż jedno
+zapytanie SQL, które muszą się powieść albo nie powieść RAZEM, kod jawnie
+otwiera transakcję (`con.setAutoCommit(false)`, commit/rollback w try/finally)
+— przykłady:
+
+  - TopicService#create — insert tematu + odczyt licznika tematów tej
+    kategorii w jednej transakcji, żeby równoległe tworzenie tematów w tej
+    samej kategorii (różne wątki puli Jetty) zawsze widziało spójny licznik
+    (read-committed widzi własne, jeszcze niezacommitowane zmiany).
+  - NoteService#save — zapis/aktualizacja treści notatki + jeden atomowy
+    UPDATE tematu (status + potwierdzenie aktualności, zob.
+    ACTUALITY_VERIFICATION.txt) w JEDNEJ transakcji: obie zmiany zachodzą
+    razem albo wcale.
+
+Żadna z tych transakcji NIE obejmuje komunikacji sieciowej (WebSocket) ani
+I/O na plikach — połączenie z bazą jest zwalniane w finally, ZANIM cokolwiek
+zostanie rozgłoszone (zob. punkt 6). Blokada bazy trwa więc wyłącznie tyle,
+ile trwają same zapytania SQL.
+
+
+3. OPTIMISTIC LOCKING — ZAMIAST LOCKÓW W PAMIĘCI
+--------------------------------------------------------------------------------
+Współbieżna edycja TEGO SAMEGO rekordu (temat, notatka) przez dwóch
+użytkowników/dwie karty NIE jest chroniona żadnym lockiem w pamięci procesu —
+zamiast tego każdy UPDATE niosący zmianę jest jednym atomowym zapytaniem SQL
+warunkowanym oczekiwaną wersją:
+
+  UPDATE topic SET ..., version = version + 1 WHERE id = ? AND version = ?
+
+Gdy druga strona zdążyła zapisać rekord pomiędzy odczytem a tym zapisem,
+`expectedVersion` się nie zgadza, 0 wierszy jest zmienionych, kod rzuca
+ConflictException -> HTTP 409. Nic nie jest przy tym zablokowane — każdy może
+próbować zapisać w dowolnej chwili, konflikt wykrywa się dopiero na samym
+zapisie. Ten sam wzorzec występuje w:
+  - TopicService#update (edycja metadanych tematu),
+  - NoteService#save (zapis treści notatki, przez markNoteSaved),
+  - ActualityVerificationService#confirmActuality (ręczne potwierdzenie),
+  - ActualityVerificationService#runVerificationSweep (markStaleAsUnverified
+    — zbiorczy UPDATE też bumpuje version, ale bez udziału klienta/HTTP).
+
+Testy współbieżności (punkt 11) uruchamiają dwa wątki startujące RÓWNOCZEŚNIE
+(przez CountDownLatch) z tą samą expectedVersion i sprawdzają, że dokładnie
+jeden wygrywa, a drugi dostaje konflikt — właśnie dlatego, że o to rozstrzyga
+baza danych (WHERE version = ?), nie kolejność wątków w JVM.
+
+
+4. BLOKADA PER-ZASÓB — AttachmentLockRegistry
+--------------------------------------------------------------------------------
+Usuwanie załącznika (AttachmentService#delete) to trzy kroki, które muszą być
+widziane spójnie: odczyt rekordu, usunięcie pliku z dysku, usunięcie rekordu
+z bazy. Optimistic locking na wersji tematu tu nie pasuje (załącznik nie ma
+własnej wersji w tym sensie) — zamiast tego jest jedna ReentrantLock NA JEDEN
+attachmentId, trzymana w `ConcurrentHashMap<Long, ReentrantLock>`:
+
+  - operacje na RÓŻNYCH załącznikach nigdy się nie blokują nawzajem (locka
+    dostaje tylko to jedno id, którego dotyczy operacja),
+  - `tryLock` z timeoutem 5s (nie `lock()` bez końca) — długo trwający upload
+    NIGDY nie trzyma tego locka (upload zawsze dotyczy świeżego id, brak
+    kolizji z usuwaniem istniejącego pliku),
+  - mapa nie rośnie trwale: `locks.remove(id, tenSamObiektLocka)` po
+    zwolnieniu usuwa wpis TYLKO jeśli wciąż wskazuje na tę samą instancję
+    locka (bezpieczne pod współbieżnością — nie usunie cudzego, świeżo
+    podstawionego locka).
+
+Test AttachmentServiceConcurrencyTest potwierdza oba efekty: dwa równoczesne
+DELETE na TEN SAM załącznik — jeden się udaje, drugi dostaje "not found";
+DELETE na dwa RÓŻNE załączniki wykonują się bez wzajemnego blokowania.
+
+
+5. MaintenanceGate — BACKUP/RESTORE A REszta APLIKACJI
+--------------------------------------------------------------------------------
+Współdzielony koordynator (backup/MaintenanceGate) między DatabaseBackupService,
+DatabaseRestoreService i MaintenanceModeFilter, złożony z czterech niezależnych
+prymitywów:
+
+  - `operationLock` (ReentrantLock, NIEBLOKUJĄCE tryLock) — wzajemne
+    wykluczenie backupu i restore, żeby pg_dump czytający i pg_restore
+    nadpisujący nigdy nie ruszyły na tej samej bazie jednocześnie. Druga
+    równoczesna próba dostaje NATYCHMIASTOWĄ, jawną odmowę (409) zamiast
+    czekać w kolejce na operację, która może trwać długo.
+  - `maintenanceMode` (AtomicBoolean) — gdy true, MaintenanceModeFilter
+    odrzuca (503) nowe żądania modyfikujące dane (POST/PUT/PATCH/DELETE poza
+    /api/admin/*).
+  - `activeWrites` (AtomicInteger) — licznik żądań modyfikujących w locie;
+    `awaitDrain(timeout)` czeka (pollingiem co 50ms, z limitem czasu) aż
+    spadnie do zera, zanim restore ruszy pg_restore — żeby żadne żądanie
+    w trakcie zapisu nie kolidowało z operacją czyszczącą bazę.
+  - `awaitingRestart` (AtomicBoolean) — trwały stan "restore się udał, ale
+    pula połączeń nie została bezpiecznie odzyskana"; od tego momentu
+    WSZYSTKIE żądania (także odczyty) dostają 503, aż proces zostanie ręcznie
+    zrestartowany (zob. BACKUP_AND_RESTORE.txt, punkt 17).
+
+Te cztery pola same w sobie są thread-safe (Atomic*/ReentrantLock) i NIE są
+chronione jednym wspólnym lockiem — kod nigdy nie trzyma dwóch z nich naraz w
+sposób wymagający spójności między nimi poza tym, co już gwarantują ich własne
+operacje atomowe.
+
+
+6. WEBSOCKET — REJESTR POŁĄCZEŃ, BROADCAST, HEARTBEAT
+--------------------------------------------------------------------------------
+Trzy osobne mechanizmy, każdy z własnym powodem, żeby być wielowątkowo bezpieczny:
+
+  a) WebSocketConnectionRegistry — Jetty obsługuje otwarcia/zamknięcia/błędy
+     połączeń WebSocket na WŁASNYCH wątkach I/O (nie na wątku żądania HTTP,
+     który akurat woła broadcast()). Zbiór aktywnych sesji to
+     `ConcurrentHashMap.newKeySet()` — dodanie/usunięcie jednej sesji nie
+     blokuje ani innych sesji, ani trwającego broadcastu. Iteracja w
+     broadcast()/pingAll() korzysta z "weakly consistent" iteratora
+     ConcurrentHashMap — nie rzuci ConcurrentModificationException, nawet
+     jeśli sesja zamknie się i zniknie ze zbioru w trakcie wysyłki na innym
+     wątku. Błąd wysyłki do JEDNEGO klienta jest łapany per-sesja (nie
+     przerywa wysyłki do reszty) i od razu usuwa uszkodzoną sesję z rejestru.
+
+  b) ApplicationEventHub — publikacja zdarzeń domenowych (TOPIC_UPDATED,
+     NOTE_SAVED, ACTUALITY_REVIEW_CHANGED, ...) NIE dzieje się na wątku
+     żądania HTTP, tylko na jednym DEDYKOWANYM wątku-demonie "ws-broadcast"
+     (`Executors.newSingleThreadExecutor`). Serializacja JSON-a i samo I/O
+     sieciowe do N klientów dzieje się już PO zwolnieniu połączenia z bazą i
+     PO wysłaniu odpowiedzi HTTP klientowi, który wykonał operację — żaden
+     użytkownik nie czeka na dosłanie WebSocketa do wszystkich pozostałych.
+     Kolejka executora jest celowo nieograniczona (zdarzenia są małe i
+     nieliczne — nie ma ryzyka zalania), a serwisy WOŁAJĄ publish(...)
+     WYŁĄCZNIE po udanym commicie swojej transakcji, nigdy przed, nigdy przy
+     błędzie (to jest KLUCZOWA zasada tego mechanizmu — złamanie jej
+     oznaczałoby rozgłoszenie zmiany, która w bazie w ogóle nie zaszła).
+
+  c) WebSocketHeartbeat — JEDEN współdzielony `ScheduledExecutorService`
+     (pojedynczy wątek-demon "ws-heartbeat") wysyła ping do WSZYSTKICH
+     aktywnych sesji na raz (registry.pingAll() w jednym przebiegu iteruje
+     cały zbiór) — liczba otwartych kart przeglądarki NIE zwiększa liczby
+     wątków aplikacji (nie ma osobnego timera per klient).
+
+
+7. SCHEDULERY CYKLICZNE — BACKUP I WERYFIKACJA AKTUALNOŚCI
+--------------------------------------------------------------------------------
+Dwa niezależne mechanizmy (DatabaseBackupService, ActualityVerificationScheduler
+— zob. ACTUALITY_VERIFICATION.txt) używają TEGO SAMEGO wzorca:
+
+  - pojedynczy `ScheduledExecutorService` z jednym wątkiem-demonem
+    (nazwanym: "backup-scheduler" / "actuality-verification-scheduler"),
+  - KAŻDY przebieg sam liczy czas do NASTĘPNEGO uruchomienia i planuje je na
+    nowo (`scheduler.schedule(...)`), zamiast stałego interwału
+    (`scheduleAtFixedRate`) — odporne na zmiany czasu letni/zimowy i na to,
+    że pojedynczy przebieg trwał dłużej niż zwykle,
+  - jednowątkowy executor sam z siebie gwarantuje, że dwa przebiegi nigdy nie
+    ruszą równolegle; ActualityVerificationScheduler ma DODATKOWO jawny
+    `AtomicBoolean running` jako redundantną, niezależną od implementacji
+    executora asekurację (i miejsce na jawny log "poprzedni przebieg wciąż
+    trwa", gdyby się to kiedyś zdarzyło),
+  - oba mają metodę `shutdown()` wołaną w shutdown hooku Main.java
+    (`Runtime.getRuntime().addShutdownHook`) — `shutdownNow()` +
+    `awaitTermination(5s)`.
+
+WebSocketHeartbeat (punkt 6c) używa podobnego wzorca, ale z prostszym
+`scheduleAtFixedRate`, bo zadanie (ping) jest krótkie i bezstanowe — nie ma
+ryzyka narastającego przesunięcia.
+
+
+8. INNE MIEJSCA
+--------------------------------------------------------------------------------
+  - CurrentUser#id() — id domyślnego użytkownika (aplikacja działa bez
+    logowania) jest odczytywane z bazy raz i cache'owane w polu `volatile
+    Long cachedId`. Wzorzec podwójnie sprawdzanego blokowania
+    (double-checked locking): szybka ścieżka bez synchronizacji, gdy już
+    wypełnione; `synchronized (this)` + ponowne sprawdzenie tylko przy
+    pierwszym (albo równoległym pierwszym) odczycie. `volatile` gwarantuje,
+    że wątek, który zobaczy niepuste `cachedId` bez wchodzenia w
+    synchronized, zobaczy w pełni zainicjalizowaną wartość (happens-before).
+
+  - ProcessRunner (backup/restore, uruchamianie pg_dump/pg_restore) — stderr
+    uruchomionego procesu jest drenowany na OSOBNYM wątku
+    ("pg-process-stderr-reader") RÓWNOLEGLE z oczekiwaniem na zakończenie
+    procesu (`process.waitFor()`), bo odczyt stderr dopiero PO waitFor()
+    mógłby się zawiesić, gdyby narzędzie zapisało więcej niż mieści bufor
+    potoku systemowego. Zebrany tekst (`StringBuilder captured`) jest
+    współdzielony między tym wątkiem a wątkiem wołającym — dostęp do niego
+    jest owinięty w `synchronized (captured)` po obu stronach.
+
+  - `java.util.Properties` (AppConfig) — wczytywane raz przy starcie i
+    wyłącznie odczytywane potem (żadnych zapisów w trakcie działania
+    aplikacji); `Properties` dziedziczy po `Hashtable`, więc pojedyncze
+    odczyty są i tak bezpieczne, ale w praktyce nie ma tu w ogóle
+    współbieżnej modyfikacji, o którą trzeba by się martwić.
+
+  - Wszystkie DAO (TopicDao, NoteDao, AttachmentDao, ...) są BEZSTANOWE —
+    żadnych pól instancyjnych poza wstrzykniętym `DataSource`/zależnościami;
+    każda metoda pożycza własne połączenie z puli i je zwraca. Bezpieczne do
+    wołania z dowolnej liczby wątków bez dodatkowej synchronizacji.
+
+
+9. ZESTAWIENIE WŁASNYCH WĄTKÓW/EXECUTORÓW TWORZONYCH PRZEZ APLIKACJĘ
+--------------------------------------------------------------------------------
+  Nazwa wątku                          | Skąd                          | Po co
+  --------------------------------------+--------------------------------+---------------------------------------------
+  (pula Jetty, domyślne nazwy)          | Server (Jetty embedded)       | Obsługa żądań HTTP/WS upgrade
+  ws-broadcast                          | ApplicationEventHub           | Serializacja+wysyłka zdarzeń domenowych do WS
+  ws-heartbeat                          | WebSocketHeartbeat            | Ping wszystkich sesji co 25s
+  backup-scheduler                      | DatabaseBackupService         | Codzienny backup o skonfigurowanej godzinie
+  actuality-verification-scheduler      | ActualityVerificationScheduler| Cykliczny sweep wg crona (zob. wyżej)
+  pg-process-stderr-reader              | ProcessRunner (per wywołanie) | Drenaż stderr pg_dump/pg_restore w locie
+  (pula HikariCP, "knowledge-forge-pool")| Database (HikariCP)          | Połączenia JDBC (max 10, min idle 2)
+
+Wszystkie własne wątki (poza pulą Jetty/HikariCP, którymi zarządzają same
+biblioteki) są demonami (`setDaemon(true)`) — nie blokują zamknięcia JVM same
+z siebie; mimo to każdy scheduler/executor ma jawne `shutdown()` wołane w
+kolejności z shutdown hooka Main.java (patrz też ACTUALITY_VERIFICATION.txt,
+punkt 7): najpierw `server.stop()` (nowe żądania przestają być przyjmowane),
+potem WS (`wsRegistry.closeAll()`, `heartbeat.shutdown()`,
+`eventHub.shutdown()`), potem schedulery (`backupService.shutdown()`,
+`actualityVerificationScheduler.shutdown()`), na końcu `dataSource.close()` —
+żeby żadne jeszcze działające zadanie nie sięgnęło po już zamkniętą pulę
+połączeń.
+
+
+10. CZEGO ŚWIADOMIE NIE MA
+--------------------------------------------------------------------------------
+  - Żadnego ręcznego poolingu wątków dla logiki biznesowej (żądanie HTTP jest
+    obsługiwane synchronicznie na wątku Jetty od początku do końca — nie ma
+    tu "odpal zadanie w tle i odpowiedz od razu" poza samym broadcastem WS).
+  - Żadnych globalnych locków obejmujących całą tabelę/cały zasób (poza
+    jednowątkowym `operationLock` w MaintenanceGate, który celowo dotyczy
+    całej bazy, bo backup/restore z natury operują na wszystkim naraz) —
+    współbieżność na poziomie pojedynczych rekordów rozstrzyga zawsze baza
+    danych (optimistic locking, punkt 3) albo per-zasobowy lock (punkt 4).
+  - Żadnego własnego frameworka aktorów/kolejek zadań — tam, gdzie
+    wystarczał zwykły `ExecutorService`/`ScheduledExecutorService` z
+    biblioteki standardowej, użyto go wprost, bez dodatkowej abstrakcji.
+
+
+11. TESTOWANIE WSPÓŁBIEŻNOŚCI
+--------------------------------------------------------------------------------
+Cztery klasy testów uruchamiają WIELE wątków RÓWNOCZEŚNIE (przez
+`CountDownLatch`: wszystkie wątki najpierw "stają w bramce", potem jedno
+`countDown()` zwalnia je jednocześnie — bez `Thread.sleep` jako namiastki
+synchronizacji, bo sleep nie gwarantuje faktycznej równoczesności):
+
+  - TopicServiceConcurrencyTest — równoczesne tworzenie wielu tematów w tej
+    samej kategorii kończy się POPRAWNYM końcowym licznikiem (żaden insert
+    "nie zgubił się" przez wyścig); dwa równoczesne update'y z tą samą
+    expectedVersion — dokładnie jeden wygrywa, drugi dostaje 409; operacje na
+    RÓŻNYCH tematach nie blokują się nawzajem.
+  - NoteServiceConcurrencyTest — analogicznie dla zapisu treści notatki
+    (jeden zapis wygrywa, drugi dostaje konflikt na wspólnej wersji tematu);
+    zapisy na różnych tematach nie blokują się nawzajem.
+  - AttachmentServiceConcurrencyTest — dwa równoczesne DELETE na TEN SAM
+    załącznik: jeden się udaje, drugi dostaje "not found"; DELETE na różne
+    załączniki nie blokują się nawzajem (zob. punkt 4).
+  - WebSocketConnectionRegistryIntegrationTest — prawdziwe połączenia WS
+    (osadzony serwer Jetty + prawdziwy klient WS w teście, nie mock): broadcast
+    dociera do wszystkich podłączonych sesji i przeżywa nagłe zerwanie jednej
+    z nich w trakcie wysyłki; zamknięta sesja jest usuwana z rejestru bez
+    wpływu na pozostałe.
+
+Testy funkcji weryfikacji aktualności (ActualityVerificationServiceTest,
+ActualityVerificationSchedulerTest) NIE testują współbieżności per se — testują
+poprawność logiki czasowej przez wstrzyknięty `Clock` (zob.
+ACTUALITY_VERIFICATION.txt, punkt 17), ale scheduler, który cyklicznie tę
+logikę odpala, jest zbudowany na tym samym, sprawdzonym wzorcu co
+DatabaseBackupService (punkt 7).
+
+================================================================================

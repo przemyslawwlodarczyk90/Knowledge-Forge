@@ -5,6 +5,8 @@ import com.example.knowledgeforge.actuality.ActualityVerificationService;
 import com.example.knowledgeforge.backup.DatabaseBackupService;
 import com.example.knowledgeforge.backup.DatabaseRestoreService;
 import com.example.knowledgeforge.backup.MaintenanceGate;
+import com.example.knowledgeforge.backup.NoteBundleBackupScheduler;
+import com.example.knowledgeforge.backup.NoteBundleBackupService;
 import com.example.knowledgeforge.config.AppConfig;
 import com.example.knowledgeforge.config.Database;
 import com.example.knowledgeforge.config.DefaultUserSeeder;
@@ -106,7 +108,7 @@ public final class Main {
         // Diagnostyka spójności baza<->dysk — tylko raportuje do logów, nic nie usuwa.
         new AttachmentDiagnosticsService(attachmentDao, attachmentStorage).run();
 
-        // ── Weryfikacja aktualności notatek (zob. ACTUALITY_VERIFICATION.txt) ────────────────
+        // ── Weryfikacja aktualności notatek (zob. dokumentacja/ACTUALITY_VERIFICATION.txt) ────────────────
         // Scheduler waliduje okres/cron/strefę w KONSTRUKTORZE, bezwarunkowo — tworzony jest więc
         // zawsze (nie tylko gdy enabled=true), żeby błędna konfiguracja zawsze przerywała start.
         ActualityVerificationService actualityVerificationService = new ActualityVerificationService(
@@ -122,6 +124,15 @@ public final class Main {
         DatabaseBackupService backupService = new DatabaseBackupService(config, maintenanceGate);
         backupService.start();
         DatabaseRestoreService restoreService = new DatabaseRestoreService(config, maintenanceGate, backupService, dataSource);
+
+        // ── Awaryjny, codzienny zbiorczy backup .kfdoc -> .kfbundle (zob. dokumentacja/BACKUP_STRATEGY.txt) ──
+        // Niezależny od bazy — skanuje notes.storage.path wprost z dysku. Scheduler waliduje
+        // cron/strefę w KONSTRUKTORZE, bezwarunkowo — tworzony jest więc zawsze, żeby błędna
+        // konfiguracja zawsze przerywała start (ten sam wzorzec co ActualityVerificationScheduler).
+        NoteBundleBackupService noteBundleBackupService = new NoteBundleBackupService(config);
+        NoteBundleBackupScheduler noteBundleBackupScheduler =
+                new NoteBundleBackupScheduler(config, noteBundleBackupService);
+        noteBundleBackupScheduler.start();
 
         // ── HTTP (Jetty embedded + zwykłe serwlety) ─────────────────
         Server server = new Server(config.serverPort());
@@ -178,6 +189,7 @@ public final class Main {
             eventHub.shutdown();
             backupService.shutdown();
             actualityVerificationScheduler.shutdown();
+            noteBundleBackupScheduler.shutdown();
             dataSource.close();
         }));
 

@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 
 /**
  * Logika biznesowa mechanizmu okresowej weryfikacji aktualności notatek — zob.
- * ACTUALITY_VERIFICATION.txt. CELOWO nie wie NIC o harmonogramie/cronie (tym zajmuje się
+ * dokumentacja/ACTUALITY_VERIFICATION.txt. CELOWO nie wie NIC o harmonogramie/cronie (tym zajmuje się
  * {@link ActualityVerificationScheduler}, który cyklicznie woła {@link #runVerificationSweep()})
  * — dzięki temu reguła biznesowa ("kiedy rekord traci aktualność") jest testowalna niezależnie
  * od zegara systemowego i od crona, przez wstrzyknięty {@link Clock}.

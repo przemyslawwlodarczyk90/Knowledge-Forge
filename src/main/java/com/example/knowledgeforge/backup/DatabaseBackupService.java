@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
  * Backup CAŁEJ bazy PostgreSQL (użytkownicy, kategorie, tematy, notatki, metadane
  * załączników i relacje topic-attachment) przez oficjalne "pg_dump -Fc" — format custom,
  * binarny i skompresowany, czytany przez pg_restore. NIE kopiuje plików z
- * attachments.storage.path (to zadanie backupu dysku, nie tej klasy — zob. BACKUP_AND_RESTORE.txt).
+ * attachments.storage.path (to zadanie backupu dysku, nie tej klasy — zob. dokumentacja/BACKUP_AND_RESTORE.txt).
  *
  * Plik lądowuje najpierw jako "*.dump.part"; dopiero po exit code 0 z pg_dump i weryfikacji,
  * że coś realnie powstało, jest atomowo przenoszony na docelową nazwę. Retencja (usuwanie

@@ -23,7 +23,7 @@ public class TopicDto {
     private Instant updatedAt;
     /** Optimistic locking — frontend odsyła tę wartość jako expectedVersion przy kolejnym PATCH-u. */
     private Integer version;
-    /** Zob. Topic#actualityVerified / ACTUALITY_VERIFICATION.txt. Nazewnictwo Java/JSON celowo identyczne. */
+    /** Zob. Topic#actualityVerified / dokumentacja/ACTUALITY_VERIFICATION.txt. Nazewnictwo Java/JSON celowo identyczne. */
     private boolean actualityVerified;
     private Instant lastVerificationOfActualityDate;
     /**

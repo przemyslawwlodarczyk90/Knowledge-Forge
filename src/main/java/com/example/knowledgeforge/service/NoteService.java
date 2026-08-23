@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -130,7 +131,7 @@ public class NoteService {
         // lockingiem (WHERE version = ?) i (2) BEZWARUNKOWĄ (przy każdym udanym zapisie, nie
         // tylko przy pierwszym) zmianę tematu — ewentualne przejście statusu NEW -> NOTE_ADDED
         // ORAZ potwierdzenie aktualności (actualityVerified=true, lastVerificationOfActualityDate
-        // =teraz — zob. ACTUALITY_VERIFICATION.txt), jednym atomowym UPDATE-em bumpującym
+        // =teraz — zob. dokumentacja/ACTUALITY_VERIFICATION.txt), jednym atomowym UPDATE-em bumpującym
         // topic.version DOKŁADNIE RAZ (TopicDao#markNoteSaved), na świeżo odczytanej w tej
         // transakcji wersji tematu. Obie zmiany (notatka + temat) muszą zajść razem albo wcale —
         // inaczej moglibyśmy zapisać notatkę, a temat zostawić w złym/nieaktualnym stanie,
@@ -236,12 +237,33 @@ public class NoteService {
         metadata.put("detailLevel", topic.getDetailLevel());
         metadata.put("categoryId", topic.getCategoryId());
         metadata.put("categoryName", category != null ? category.getName() : null);
+        // Pełna ścieżka kategorii (root -> liść), np. ["Instrukcje","Aplikacje","Produkcja"] — zob.
+        // dokumentacja/BACKUP_STRATEGY.txt, punkt "Awaryjny odczyt .kfdoc/.kfbundle". Uzupełnia
+        // dotychczasowe pojedyncze categoryName, żeby panel ratunkowy (bez dostępu do bazy) mógł
+        // pokazać całą ścieżkę, nie tylko nazwę bezpośredniej kategorii. Starsze pliki .kfdoc sprzed
+        // tej zmiany po prostu nie mają tego pola w manifeście — odczyt musi wtedy spaść z powrotem
+        // na categoryName albo pustą ścieżkę (zob. frontend, panel ratunkowy).
+        metadata.put("categoryPath", categoryPath(category, topic.getUserId()));
         metadata.put("topicCreatedAt", topic.getCreatedAt());
         metadata.put("topicUpdatedAt", topic.getUpdatedAt());
         metadata.put("noteCreatedAt", noteCreatedAt);
         metadata.put("noteVersion", version);
         metadata.put("savedAt", Instant.now());
         return metadata;
+    }
+
+    /** Ścieżka kategorii root -> liść, wyznaczana raz przy zapisie (nie trzymana gdzie indziej). */
+    private List<String> categoryPath(CategoryNode leaf, Long userId) {
+        if (leaf == null) return List.of();
+        LinkedList<String> path = new LinkedList<>();
+        CategoryNode current = leaf;
+        int guard = 0; // zabezpieczenie przed teoretycznym cyklem parentId — nigdy nie powinno wystąpić
+        while (current != null && guard++ < 64) {
+            path.addFirst(current.getName());
+            UUID parentId = current.getParentId();
+            current = parentId == null ? null : categoryDao.findByIdAndUserId(parentId, userId).orElse(null);
+        }
+        return path;
     }
 
     private Map<String, byte[]> decodeAssets(List<SaveNoteRequest.AssetPayload> assets) {

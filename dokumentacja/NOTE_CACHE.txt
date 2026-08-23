@@ -1,0 +1,292 @@
+================================================================================
+Knowledge-Forge — Cache treści notatek (frontend)
+================================================================================
+
+1. CEL
+--------------------------------------------------------------------------------
+Otwarcie wpisu w NotePanel wykonuje GET /api/topics/{topicId}/note. Backend przy
+każdym takim żądaniu odczytuje z dysku binarny plik .kfdoc (ZIP: manifest.json +
+content.json + wklejone obrazki, zob. document.DocumentContainer) i go dekoduje.
+Bez cache'a każde przełączenie się między tematami w drzewie kategorii — nawet
+wielokrotne wejście w TEN SAM temat w ciągu kilku minut, np. przy porównywaniu
+kilku wpisów — generowało nowe żądanie HTTP i nowy odczyt/dekodowanie pliku na
+backendzie, mimo że treść realnie się nie zmieniła.
+
+Cache opisany w tym dokumencie ogranicza tę liczbę żądań, trzymając ostatnio
+użyte notatki w pamięci JS otwartej karty przeglądarki.
+
+
+2. GDZIE ŻYJE CACHE — WYŁĄCZNIE PAMIĘĆ JS BIEŻĄCEJ KARTY
+--------------------------------------------------------------------------------
+Cache jest zwykłym modułem-singletonem JavaScript (dwie instancje `Map` w
+zamknięciu modułu) — DOKŁADNIE tak samo, jak istniejący klient WebSocket
+(zob. frontend/src/ws/socket.js).
+
+Świadomie NIE używa:
+  - localStorage,
+  - sessionStorage,
+  - IndexedDB,
+  - Service Workera,
+  - żadnego cache'a po stronie backendu.
+
+Konsekwencja: cache znika przy odświeżeniu strony (F5) i przy zamknięciu karty —
+to jest ZAMIERZONE, nie przeoczenie. Cache nie jest też w żaden sposób
+współdzielony między kartami/oknami przeglądarki ani między użytkownikami —
+każda karta ma własną, w pełni niezależną kopię.
+
+
+3. CZAS ŻYCIA — 30 MINUT, PRZESUWNE (LRU + TTL)
+--------------------------------------------------------------------------------
+Każdy pozytywny wpis (pełna odpowiedź notatki: `contentJson`, `version`,
+`createdAt`, `updatedAt`, ...) jest ważny 30 minut od momentu OSTATNIEGO
+użycia, nie od momentu zapisania w cache:
+  - pierwsze pobranie zapisuje notatkę w cache z aktualnym czasem jako
+    "ostatnio użyto",
+  - KAŻDE kolejne trafienie w cache (odczyt) odnawia ten czas o kolejne
+    30 minut,
+  - wpis nieużywany przez 30 minut wygasa — kolejne otwarcie tego tematu
+    pobiera notatkę na nowo z backendu i zapisuje świeży wpis.
+
+Dodatkowo obowiązuje twardy limit 50 pozytywnych wpisów jednocześnie. Po
+przekroczeniu limitu usuwany jest wpis NAJDAWNIEJ używany (LRU — Least
+Recently Used), nie najstarszy pod względem czasu zapisania. Implementacja:
+zwykła `Map` — kolejność jej kluczy odpowiada kolejności "od najdawniej do
+najświeżej używanego"; każde trafienie przenosi wpis na koniec.
+
+
+4. CACHE ODPOWIEDZI 404 ("BRAK NOTATKI") — OSOBNY, KRÓTSZY TTL
+--------------------------------------------------------------------------------
+Temat bez zapisanej jeszcze notatki zwraca z backendu 404. To też bywa
+odpytywane wielokrotnie (np. przeglądanie tematów "do uzupełnienia"), więc
+cache trzyma osobny, NEGATYWNY wpis — "dla tego tematu obecnie nie ma
+notatki" — ważny 2 minuty od zapisania.
+
+W odróżnieniu od pozytywnego cache'a ten wpis ma STAŁY (nie przesuwny) TTL —
+2 minuty od zapisania, bez odnawiania przy kolejnych odczytach — i nie
+podlega limitowi 50/LRU (to mały, rzadko rosnący zbiór).
+
+Zapisanie pozytywnego wpisu dla tematu NATYCHMIAST kasuje jego ewentualny
+negatywny wpis (i odwrotnie) — oba nie mogą być prawdziwe jednocześnie.
+
+Żadne INNE błędy HTTP (500, 403, ...) ani błędy sieciowe NIE są cache'owane —
+cache'owana jest wyłącznie sama informacja "notatka nie istnieje" (404).
+
+
+5. PRZEPŁYW: CACHE HIT / CACHE MISS
+--------------------------------------------------------------------------------
+Przy otwieraniu tematu w NotePanel (efekt reagujący na zmianę `topic.id`):
+
+  1. Sprawdź pozytywny wpis w cache (`getCachedNote(topicId)`).
+     TRAFIENIE -> ustaw notatkę w stanie, wstaw `contentJson` do edytora
+     TipTap, odśwież `originalContentRef` (do czego wraca "Anuluj"), NIE
+     wykonuj żądania HTTP. Czas ostatniego użycia wpisu zostaje odnowiony.
+
+  2. W przeciwnym razie sprawdź świeży (< 2 min) negatywny wpis
+     (`getCachedNoteMissing(topicId)`).
+     TRAFIENIE -> zachowaj się tak, jakby backend właśnie zwrócił 404 (widok
+     "Brak treści — kliknij Edytuj"), bez żądania HTTP.
+
+  3. Brak trafienia (albo wpis wygasł — cache sam go usuwa przy odczycie) ->
+     prawdziwe `GET /api/topics/{topicId}/note`.
+       - 200: pełna odpowiedź trafia do cache (`setCachedNote`) I dopiero
+         wtedy do edytora.
+       - 404: temat trafia do negatywnego cache'a (`setCachedNoteMissing`).
+       - inny błąd: NIC nie jest cache'owane, użytkownik widzi komunikat
+         błędu — kolejne wejście spróbuje ponownie.
+
+Ochrona przed wyścigiem przy szybkim przełączaniu tematów: każde żądanie
+niesie własny `AbortController`; zmiana `topic.id` (albo odmontowanie
+komponentu) anuluje POPRZEDNIE, jeszcze niezakończone żądanie w funkcji
+sprzątającej efektu. Odpowiedź zignorowana jest dodatkowo sprawdzana pod
+`controller.signal.aborted` zarówno w gałęzi sukcesu, jak i błędu — spóźniona
+odpowiedź dla tematu, który nie jest już wyświetlany, nigdy nie nadpisze
+aktualnie widocznej notatki.
+
+
+6. AKTUALIZACJA PO WŁASNYM ZAPISIE
+--------------------------------------------------------------------------------
+Po poprawnym `notesApi.save(...)` (przycisk "Zapisz") cache dostaje DOKŁADNIE
+odpowiedź zwróconą przez backend (`setCachedNote(topicId, res.data)`) — łącznie
+z nowym `version` i `contentJson`. Świadomie NIE wykonuje się żadnego
+dodatkowego `GET`, tylko po to, żeby "odświeżyć" cache — odpowiedź zapisu już
+zawiera pełny, aktualny stan.
+
+Nieudany zapis (błąd sieci albo 409 — konflikt wersji, optimistic locking) NIE
+dotyka cache'a: niepotwierdzona treść z edytora nigdy nie trafia do cache jako
+"aktualna" wersja notatki. Istniejący mechanizm optimistic lockingu (wysyłanie
+`baseVersion`, obsługa 409, komunikat konfliktu z możliwością ręcznego
+skopiowania treści) pozostaje bez zmian — cache go w żaden sposób nie omija
+ani nie zastępuje.
+
+
+7. UNIEWAŻNIANIE PRZEZ WEBSOCKET — NOTE_SAVED
+--------------------------------------------------------------------------------
+Cache pozostaje aktualny w trakcie pracy aplikacji dzięki istniejącemu,
+współdzielonemu połączeniu WebSocket (zob. ws/socket.js, useApplicationEvents).
+NotePanel nasłuchuje na zdarzenie `NOTE_SAVED` (pomijając zdarzenia
+wywołane przez tę samą kartę — `sourceClientId` równy własnemu `clientId`,
+bo taki zapis już zaktualizował stan i cache przez odpowiedź HTTP) i reaguje
+w zależności od tego, jakiego tematu dotyczy zdarzenie:
+
+  a) Temat NIE jest aktualnie otwarty w NotePanel
+     -> natychmiastowe `invalidateCachedNote(topicId)`, BEZ pobierania.
+        Aktualna wersja zostanie pobrana dopiero przy kolejnym otwarciu tego
+        tematu (zwykły cache miss, zob. punkt 5).
+
+  b) Temat JEST aktualnie otwarty, tryb PODGLĄDU
+     -> unieważnij stary wpis, po cichu pobierz aktualną wersję z backendu,
+        zaktualizuj widok (notatkę i edytor) ORAZ zapisz świeżo pobraną
+        wersję w cache. W trybie podglądu nie ma niczego do ochrony, więc
+        odświeżenie jest w pełni bezpieczne.
+
+  c) Temat JEST aktualnie otwarty, tryb EDYCJI
+     -> unieważnij stary wpis cache, ale NIE dotykaj edytora. Pokazuje się
+        istniejący komunikat "inny użytkownik zapisał w tle nowszą wersję"
+        z możliwością ręcznego skopiowania treści przez użytkownika.
+        Niezapisana, lokalna treść z edytora NIGDY nie trafia do cache jako
+        "aktualna" wersja notatki (byłaby fałszywym stanem — backend ma inną
+        wersję, a ten zapis i tak dostanie 409, gdyby spróbował nadpisać).
+
+
+8. UTRATA I ODZYSKANIE POŁĄCZENIA WEBSOCKET
+--------------------------------------------------------------------------------
+Cache jest bezpieczny TYLKO przy nieprzerwanej ciągłości zdarzeń WebSocket —
+podczas rozłączenia backend może wysłać `NOTE_SAVED`, którego ta karta nigdy
+nie odbierze. Dlatego NotePanel korzysta z istniejącego `useReconnectResync`
+(reaguje WYŁĄCZNIE na odzyskanie połączenia PO wcześniejszym rozłączeniu —
+NIE na pierwsze połączenie zaraz po starcie aplikacji, o co dba sam hook) i
+przy każdym takim odzyskaniu:
+
+  - czyści CAŁY cache notatek (`clearNoteCache()` — i pozytywne, i negatywne
+    wpisy, dla wszystkich tematów, nie tylko otwartego),
+  - jeśli aktualnie otwarta notatka jest w trybie PODGLĄDU: pobiera jej
+    aktualną wersję z backendu i zapisuje ją w cache jako nowy wpis,
+  - jeśli jest w trybie EDYCJI: NIE nadpisuje lokalnej, niezapisanej treści —
+    pokazuje nowy komunikat ostrzegawczy ("Połączenie z serwerem zostało na
+    chwilę utracone — podczas przerwy ktoś inny mógł zapisać nowszą wersję")
+    z tym samym mechanizmem "Odśwież aktualną wersję" co przy zwykłym
+    konflikcie 409.
+
+Celowo NIE pobiera hurtowo wszystkich tematów, które akurat były w cache przed
+rozłączeniem — to byłoby niepotrzebnym obciążeniem backendu w reakcji na sam
+fakt reconnectu; zamiast tego każdy temat po prostu przechodzi przez zwykły
+cache miss przy najbliższym otwarciu.
+
+
+9. RĘCZNE ODŚWIEŻENIE PO KONFLIKCIE (reloadAfterConflict)
+--------------------------------------------------------------------------------
+Przycisk "Odśwież aktualną wersję" (widoczny przy konflikcie 409 albo po
+zdarzeniu NOTE_SAVED w trybie edycji) ZAWSZE omija cache przy odczycie —
+użytkownik świadomie prosi o naprawdę aktualną wersję z backendu, a nie o to,
+co akurat jest w pamięci. Kolejność: pobierz z backendu -> zastąp wpis w
+cache świeżą odpowiedzią -> dopiero potem zaktualizuj edytor i wróć do trybu
+podglądu.
+
+
+10. ŚWIADOME OGRANICZENIA
+--------------------------------------------------------------------------------
+  - Cache jest per-karta. Dwie karty tej samej przeglądarki (albo dwaj różni
+    użytkownicy) mają całkowicie niezależne cache'e — WebSocket jest jedynym
+    mechanizmem utrzymującym je w spójności ze sobą nawzajem, nie jest to
+    współdzielona pamięć.
+  - Odświeżenie strony (F5) i zamknięcie karty NIEODWRACALNIE czyszczą cache
+    tej karty — to zamierzone uproszczenie (żadnej persystencji, żadnej
+    inwalidacji między kartami do zaimplementowania).
+  - Jeśli WebSocket jest rozłączony DŁUŻEJ niż raz (np. kilka cykli
+    rozłączenie/reconnect pod rząd, zanim użytkownik zdąży coś zrobić),
+    zachowanie jest bezpieczne, ale nadmiarowo ostrożne — każdy reconnect
+    czyści cały cache od nowa, nawet jeśli poprzednie czyszczenie było
+    sekundy wcześniej.
+  - Mechanizm nie zna pojęcia "przybliżonej" świeżości między kartami —
+    jeśli dwie karty mają otwartą tę samą notatkę i obie są offline
+    jednocześnie, każda dowie się o zmianach dopiero po SWOIM własnym
+    reconnect.
+
+
+11. LOKALIZACJA PLIKÓW
+--------------------------------------------------------------------------------
+  frontend/src/cache/noteCache.js
+      Sam mechanizm cache — dwie `Map` w zamknięciu modułu, TTL/LRU, kopiowanie
+      danych (patrz punkt 12). Eksportuje: `getCachedNote`, `setCachedNote`,
+      `invalidateCachedNote`, `clearNoteCache`, `getCachedNoteMissing`,
+      `setCachedNoteMissing` oraz diagnostyczne `getNoteCacheSize`,
+      `getNoteCacheMissingSize`. Moduł jest celowo "głupi" — nie wie nic o
+      WebSocket ani o React; DECYZJĘ o tym, kiedy z niego skorzystać,
+      podejmuje wywołujący kod.
+
+  frontend/src/components/knowledge/NotePanel.jsx
+      Cała logika DECYZYJNA: efekt ładowania notatki (cache hit/miss +
+      AbortController), handler zdarzeń WebSocket (NOTE_SAVED — inwalidacja
+      dla tematów nieotwartych, odświeżenie dla otwartych w podglądzie,
+      komunikat konfliktu w edycji), `useReconnectResync` (czyszczenie cache
+      po odzyskaniu połączenia), `confirmSave` (zapis do cache po własnym
+      zapisie), `reloadAfterConflict` (zawsze omija cache).
+
+  frontend/src/test/noteCache.test.js
+      Testy jednostkowe samego mechanizmu cache (zapis/odczyt, wygasanie,
+      przesuwny TTL, LRU, limit 50, cache 404, brak współdzielenia
+      mutowalnego `contentJson`).
+
+  frontend/src/test/NotePanel.test.jsx
+      Testy integracyjne komponentu — cache hit nie wykonuje requestu, cache
+      miss po wygaśnięciu wykonuje, zapis aktualizuje cache, NOTE_SAVED innego
+      klienta unieważnia/odświeża/nie nadpisuje edytowanej treści (zależnie
+      od trybu), reconnect czyści cache, reloadAfterConflict omija cache,
+      szybkie przełączanie tematów nie pokazuje odpowiedzi dla poprzedniego
+      tematu.
+
+
+12. UWAGA O MUTOWALNOŚCI — DLACZEGO CACHE KOPIUJE DANE
+--------------------------------------------------------------------------------
+`contentJson` to drzewo dokumentu edytora TipTap/ProseMirror. Edytor TipTap
+mutuje takie drzewa W MIEJSCU (np. `resolveImageAssets` w NotePanel.jsx
+świadomie operuje na głębokiej kopii `editor.getJSON()` z dokładnie tego
+samego powodu). Gdyby cache trzymał bezpośrednią referencję do obiektu, który
+trafił też do edytora (albo odwrotnie), edycja w edytorze mogłaby po cichu
+"przeciekać" do wpisu w cache — i odwrotnie, przyszła zmiana wpisu w cache
+mogłaby wpłynąć na to, co widać na ekranie, bez żadnego zapisu.
+
+Dlatego `noteCache.js` kopiuje dane (`structuredClone`, z awaryjnym spadkiem
+na `JSON.parse(JSON.stringify(...))`, gdyby `structuredClone` nie było
+dostępne) w OBU kierunkach: przy zapisie do cache (`setCachedNote`) i przy
+odczycie z cache (`getCachedNote`). Żaden obiekt zwrócony z cache'a ani
+przekazany do niego nie jest tym samym obiektem w pamięci co ten, który trzyma
+sam cache.
+
+
+13. JAK TESTOWAĆ / DEBUGOWAĆ
+--------------------------------------------------------------------------------
+Automatycznie:
+  cd frontend
+  npm run test              # cała suita, w tym noteCache.test.js i NotePanel.test.jsx
+  npm run test -- --run src/test/noteCache.test.js
+  npm run test -- --run src/test/NotePanel.test.jsx
+
+Testy czasu (wygasanie 30 min / 2 min) używają fake timerów Vitest
+(`vi.useFakeTimers()` + `vi.setSystemTime`/`vi.advanceTimersByTimeAsync`) —
+NIE czekają naprawdę 30 minut.
+
+Ręcznie, w przeglądarce (DevTools -> konsola), na uruchomionej aplikacji:
+  - zakładka Network, filtr "note" — licznik żądań GET .../note przy
+    wielokrotnym otwieraniu tego samego tematu w ciągu 30 minut powinien
+    pozostać na jedynce (poza samym pierwszym wejściem).
+  - w konsoli widać `console.debug('[NotePanel]', ...)` z jednoznacznymi
+    etykietami: "note cache hit", "note cache hit (missing marker)",
+    "loading note for topic", "note loaded", "WS reconnect — clearing note
+    cache" — najszybszy sposób, by ustalić, którą gałąź przepływu z punktu 5
+    aplikacja właśnie wykonała.
+  - `noteCache.js` nie jest wystawione na `window` — żeby zajrzeć w jego stan
+    ręcznie z konsoli przeglądarki, najprościej dodać tymczasowo
+    `window.__noteCache = { getNoteCacheSize, getNoteCacheMissingSize }` na
+    końcu modułu i wywołać `__noteCache.getNoteCacheSize()`.
+
+Typowe pułapki przy dalszej pracy nad tym mechanizmem:
+  - Zmiana kształtu odpowiedzi `GET/PUT .../note` na backendzie (nowe/inne
+    pola) automatycznie trafia do cache razem z resztą — cache nie filtruje
+    ani nie waliduje kształtu obiektu, trzyma to, co dostał.
+  - Jeśli dojdzie kolejny sposób modyfikacji notatki (inny niż
+    `notesApi.save`), PAMIĘTAJ o wywołaniu `setCachedNote`/
+    `invalidateCachedNote` analogicznie do `confirmSave` — cache NIE
+    dowiaduje się o zmianach inaczej niż przez jawne wywołania z NotePanel
+    albo przez zdarzenie WebSocket `NOTE_SAVED`.
+================================================================================

@@ -1,0 +1,415 @@
+================================================================================
+Knowledge-Forge — Weryfikacja aktualności notatek/instrukcji
+================================================================================
+
+1. PO CO TO JEST
+--------------------------------------------------------------------------------
+Notatki i instrukcje starzeją się — po pewnym czasie treść może być nieaktualna,
+mimo że nikt jej nie dotykał. Ten mechanizm okresowo oznacza tematy, których
+nikt świadomie nie potwierdził/nie edytował od dłużej niż skonfigurowany okres,
+jako "wymagające ponownego sprawdzenia", i daje użytkownikowi osobny panel do
+ich przejrzenia i potwierdzenia.
+
+Mechanizm NIE ocenia treści notatki — wyłącznie liczy czas od ostatniego
+świadomego potwierdzenia (albo od utworzenia, jeśli nigdy nie potwierdzono).
+
+
+2. DWA POLA NA TEMACIE (Topic)
+--------------------------------------------------------------------------------
+  actualityVerified (boolean, domyślnie true)
+      Czy temat jest obecnie uznawany za aktualny. true = aktualny (nikt nie
+      musi nic robić). false = wymaga sprawdzenia — pojawia się w panelu
+      "Weryfikacja aktualności" (zob. punkt 8).
+
+  lastVerificationOfActualityDate (data-czas, może być null)
+      Kiedy ktoś ostatnio ŚWIADOMIE potwierdził aktualność — ręcznym przyciskiem
+      (punkt 6) albo udanym zapisem treści notatki (punkt 7). null oznacza
+      "nigdy" — wtedy okres liczy się od daty utworzenia tematu (createdAt).
+
+Kolumny w bazie: actuality_verified BOOLEAN NOT NULL DEFAULT TRUE,
+last_verification_of_actuality_date TIMESTAMPTZ (NULL dozwolony).
+
+Te pola zmieniają się WYŁĄCZNIE przez mechanizmy opisane w tym dokumencie
+(potwierdzenie ręczne, zapis notatki, sweep schedulera) — nigdy przez ogólny
+PATCH /api/topics/{id} (zob. komentarz przy Topic#actualityVerified w kodzie).
+
+
+3. NOWE TEMATY
+--------------------------------------------------------------------------------
+Każdy nowo utworzony temat startuje z actualityVerified=true i
+lastVerificationOfActualityDate=null — traktowany jako aktualny od razu, a
+okres ważności zacznie być liczony od jego createdAt.
+
+
+4. MIGRACJA ISTNIEJĄCYCH DANYCH
+--------------------------------------------------------------------------------
+Migracja to dwie idempotentne instrukcje w Schema.java, wykonywane przy KAŻDYM
+starcie aplikacji (ALTER TABLE ... ADD COLUMN IF NOT EXISTS — bezpieczne do
+uruchomienia wielokrotnie, nic nie robią, jeśli kolumny już istnieją):
+
+  ALTER TABLE topic ADD COLUMN IF NOT EXISTS
+      actuality_verified BOOLEAN NOT NULL DEFAULT TRUE;
+  ALTER TABLE topic ADD COLUMN IF NOT EXISTS
+      last_verification_of_actuality_date TIMESTAMPTZ;
+
+Rekordy sprzed migracji dostają actuality_verified=TRUE (dzięki DEFAULT) i
+last_verification_of_actuality_date=NULL. ŚWIADOMIE NIE ustawiamy im sztucznej
+daty "teraz" — data bazowa dla takich rekordów po prostu spada z powrotem na
+ich createdAt (zob. punkt 5). Ustawienie fałszywego "teraz" ukryłoby faktyczny
+wiek treści i odsunęłoby pierwszą realną weryfikację o cały skonfigurowany okres.
+
+Dodatkowo częściowy indeks (nie obejmuje rekordów już aktualnych — zwykle
+większości — więc jest mały i tani w utrzymaniu):
+
+  CREATE INDEX IF NOT EXISTS idx_topic_actuality_unverified
+      ON topic (user_id, author) WHERE actuality_verified = FALSE;
+
+
+5. DATA BAZOWA I MOMENT UTRATY AKTUALNOŚCI
+--------------------------------------------------------------------------------
+Data bazowa = lastVerificationOfActualityDate, jeśli jest ustawiona,
+w przeciwnym razie createdAt.
+
+Temat traci aktualność (actualityVerified: true -> false), gdy:
+
+  data_bazowa + skonfigurowany_okres <= teraz
+
+Porównanie jest KALENDARZOWE (java.time.Period — np. "2 lata"), nie sztywną
+liczbą dni (nie "730 dni") — poprawnie uwzględnia lata przestępne i różne
+długości miesięcy. Cutoff liczony jest raz na przebieg schedulera:
+  ZonedDateTime.ofInstant(teraz, strefa).minus(okres).toInstant()
+w skonfigurowanej strefie czasowej (punkt 6), a samo porównanie w SQL to jeden
+warunek COALESCE(last_verification_of_actuality_date, created_at) <= cutoff —
+żadnego pobierania wszystkich rekordów do Javy i filtrowania w pamięci.
+
+Rekord, który JEST JUŻ actualityVerified=false, nigdy nie jest ponownie
+dotykany przez sweep — dopóki ktoś świadomie go nie potwierdzi (punkt 6/7),
+zostaje na liście "wymaga sprawdzenia" bezterminowo.
+
+
+6. KONFIGURACJA — config.properties
+--------------------------------------------------------------------------------
+  actuality.verification.enabled=true
+      Wyłącza WYŁĄCZNIE harmonogram (scheduler przestaje w ogóle się
+      uruchamiać). Endpointy ręcznego potwierdzenia i listy "do sprawdzenia"
+      działają niezależnie od tej flagi.
+
+  actuality.verification.period=P2Y
+      Zapis zgodny z java.time.Period (ISO-8601 duration dla dat): P2Y = 2 lata,
+      P6M = 6 miesięcy, P1Y6M = rok i pół, P90D = 90 dni. Dowolna wartość inna
+      niż domyślne 2 lata jest w pełni wspierana (patrz testy, punkt 13).
+
+  actuality.verification.cron=0 17 * * 5
+      Pięciopolowy cron UNIX (minuta godzina dzień-miesiąca miesiąc
+      dzień-tygodnia). Przykład domyślny "0 17 * * 5" = każdy piątek o 17:00.
+      Parsowany i walidowany biblioteką com.cronutils:cron-utils (jedyna nowa
+      zależność dodana do tej funkcji) — bez ręcznie pisanego, niepełnego
+      parsera crona.
+
+  actuality.verification.zone-id=Europe/Warsaw
+      Jawna strefa czasowa (IANA, np. "Europe/Warsaw", "UTC") — NIEZALEŻNA od
+      strefy skonfigurowanej na serwerze/w systemie operacyjnym. Używana
+      zarówno do liczenia najbliższego uruchomienia crona, jak i do liczenia
+      samego okresu ważności (punkt 5) — jedna spójna strefa dla obu.
+
+Wszystkie trzy wartości (period, cron, zone-id) są parsowane i WALIDOWANE
+w konstruktorze ActualityVerificationScheduler — BEZWARUNKOWO, niezależnie od
+`enabled`. Błędna wartość w którejkolwiek z nich PRZERYWA START APLIKACJI
+jawnym, zrozumiałym wyjątkiem (np. "Invalid actuality.verification.cron '...'
+— expected a 5-field UNIX cron expression..."), zamiast po cichu wyłączać
+mechanizm.
+
+
+7. HARMONOGRAM (ActualityVerificationScheduler)
+--------------------------------------------------------------------------------
+Wzorzec identyczny jak przy backupie bazy (DatabaseBackupService) — zob. też
+MULTITHREADING.txt punkt "Schedulery cykliczne":
+
+  - pojedynczy, dedykowany wątek-demon "actuality-verification-scheduler"
+    (ScheduledExecutorService z jednym wątkiem),
+  - każdy przebieg liczy czas do NASTĘPNEGO uruchomienia na nowo (na podstawie
+    crona i strefy z konfiguracji), zamiast stałego interwału — odporne na
+    zmiany czasu letni/zimowy i na to, że pojedynczy przebieg trwał dłużej
+    niż zwykle,
+  - AtomicBoolean pilnuje, żeby dwa przebiegi NIGDY nie ruszyły równolegle
+    (redundantne względem jednowątkowego executora, ale jawne — nie zależy od
+    szczegółów implementacji),
+  - loguje jawnie start ("Actuality verification run started") i koniec z
+    liczbą zmienionych rekordów ("... finished — marked N topic(s) as
+    unverified"),
+  - NIE blokuje wątku obsługującego żądania HTTP — działa całkowicie osobno,
+  - poprawnie zatrzymywany w shutdown hooku Main.java (scheduler.shutdown()
+    razem z resztą — backup, WebSocket, pula połączeń).
+
+Sam sweep (ActualityVerificationService#runVerificationSweep) NIE czyta plików
+.kfdoc — operuje wyłącznie na kolumnach tematu, jednym zbiorczym zapytaniem SQL
+(TopicDao#markStaleAsUnverified).
+
+
+8. ZMIANA topic.version PRZY ZBIORCZYM OZNACZANIU I SYNCHRONIZACJA
+--------------------------------------------------------------------------------
+markStaleAsUnverified wykonuje jeden UPDATE z RETURNING:
+
+  UPDATE topic SET actuality_verified = FALSE, version = version + 1
+  WHERE actuality_verified = TRUE
+    AND COALESCE(last_verification_of_actuality_date, created_at) <= ?
+  RETURNING *;
+
+version jest bumpowany (spójnie z optimistic lockingiem używanym wszędzie
+indziej w aplikacji — zob. punkt 9), a last_verification_of_actuality_date
+NIE jest przy tym zmieniane (sweep tylko ODCZYTUJE tę kolumnę do porównania,
+nigdy jej nie nadpisuje — inaczej straciłaby znaczenie "kiedy ostatnio
+potwierdzono").
+
+Dla każdego zmienionego tematu backend rozgłasza zwykłe zdarzenie WebSocket
+TOPIC_UPDATED — z aktorem/klientem ustawionym na null (celowo: to zdarzenie
+systemowe, nie ma jednej "sprawczej karty", więc WSZYSTKIE otwarte karty,
+łącznie z tą, która akurat patrzy na dany temat, mają je zastosować, zamiast
+zignorować jako "własne"). Dzięki temu żadna otwarta karta z NotePanel nie
+zostaje ze starą wartością topic.version.
+
+Dodatkowo, PO całym sweepie, jeśli cokolwiek się zmieniło, leci JEDNO lekkie
+zdarzenie ACTUALITY_REVIEW_CHANGED (payload: changedCount, topicIds) — zob.
+punkt 11.
+
+
+9. RĘCZNE POTWIERDZENIE — POST /api/topics/{topicId}/verify-actuality
+--------------------------------------------------------------------------------
+Body:
+  { "expectedVersion": 7 }
+
+To NIE jest generyczny endpoint przyjmujący dowolny boolean — jedyne, co robi,
+to: sprawdza istnienie i własność tematu, stosuje optimistic locking na
+version, ustawia actualityVerified=true i
+lastVerificationOfActualityDate=teraz, zwiększa version, zwraca aktualny
+TopicDto, i dopiero PO udanym committcie rozgłasza zdarzenie WebSocket.
+
+Optimistic locking — dokładnie ten sam wzorzec co reszta aplikacji:
+
+  UPDATE topic SET actuality_verified = TRUE,
+                    last_verification_of_actuality_date = ?, version = version + 1
+  WHERE id = ? AND version = ?
+
+Niezgodna expectedVersion (0 zmienionych wierszy) -> ConflictException ->
+HTTP 409. Frontend na 409 odświeża listę panelu i informuje użytkownika, że
+rekord zmienił się w międzyczasie (zob. punkt 10).
+
+Operacja jest biznesowo idempotentna (potwierdzenie już-aktualnego tematu
+nadal się powiedzie i tylko przesunie datę), ale WCIĄŻ chroniona wersją — dwa
+równoczesne potwierdzenia tego samego tematu z tą samą "starą" expectedVersion
+nie mogą oba się powieść.
+
+
+10. PANEL "WERYFIKACJA AKTUALNOŚCI" — POTWIERDZANIE (frontend)
+--------------------------------------------------------------------------------
+Kliknięcie "Potwierdź aktualność" w wierszu rekordu NIE woła od razu API —
+najpierw pokazuje modal (tytuł tematu, jawna informacja że potwierdzasz
+aktualność BEZ edycji treści, przyciski Anuluj/Potwierdź aktualność). Dopiero
+potwierdzenie WEWNĄTRZ modala woła POST verify-actuality. W trakcie żądania:
+przyciski modala są zablokowane (loading), modal się nie zamyka przed
+wynikiem.
+
+  - Sukces: rekord znika z listy panelu, komunikat sukcesu, modal się zamyka.
+  - Konflikt wersji (409): modal się zamyka, komunikat że rekord zmienił się
+    w międzyczasie, lista jest odświeżana od nowa (GET actuality-review).
+  - Inny błąd: rekord ZOSTAJE na liście, modal ZOSTAJE otwarty — można
+    spróbować ponownie.
+
+
+11. GET /api/topics/actuality-review[?author=Jan]
+--------------------------------------------------------------------------------
+Zwraca WYŁĄCZNIE tematy actualityVerified=false należące do bieżącego
+użytkownika, opcjonalnie zawężone po autorze, posortowane od najstarszej daty
+bazowej (COALESCE(last_verification_of_actuality_date, created_at) ASC —
+wspierane częściowym indeksem z punktu 4). Zapytanie NIE czyta treści .kfdoc —
+tylko kolumny tematu (TopicDto niesie wszystko, co potrzebne: id, title,
+author, type, categoryId, createdAt, lastVerificationOfActualityDate,
+actualityVerified, version).
+
+W TopicServlet ta ścieżka jest sprawdzana PRZED ogólną obsługą
+/api/topics/{id} — inaczej "actuality-review" trafiłoby do parsowania UUID
+i zwróciło 400 zamiast właściwej listy.
+
+Panel po stronie frontendu (ActualityReviewPanel — przycisk "Weryfikacja
+aktualności" w menu bocznym, bezpośrednio pod "Filtry"):
+  - pełnoekranowy, wysuwany od prawej, layout WSPÓLNY z (przebudowanym)
+    panelem Filtrów (SlideOverPanel: backdrop, panel na 100% szerokości,
+    nagłówek, zamykanie krzyżykiem/tłem/Escape) — wspólny jest WYŁĄCZNIE ten
+    layout/chrome, logika biznesowa obu paneli zostaje osobno,
+  - automatycznie pobiera CAŁĄ listę od razu przy otwarciu, bez konieczności
+    wcześniejszego wybrania filtra,
+  - kompaktowy filtr autora na górze ("Dowolny" = wszystkie; zmiana filtra od
+    razu odświeża listę — bez osobnego przycisku "Zastosuj", w przeciwieństwie
+    do wieloczęściowego panelu Filtrów), lista wyników pod spodem z własnym
+    przewijaniem,
+  - każdy wiersz pokazuje: tytuł, autora, typ (notatka/instrukcja), ścieżkę
+    kategorii, datę utworzenia, ostatnią datę potwierdzenia (albo jawnie
+    "Nigdy — termin liczony od utworzenia"), datę bazową użytą do liczenia
+    okresu, i dwa osobne przyciski: "Potwierdź aktualność" i "Edytuj",
+  - stany: ładowanie, pusta lista ("Wszystkie notatki są aktualne"), błąd z
+    możliwością ponowienia.
+
+
+12. PRZEJŚCIE PRZEZ "EDYTUJ" (z panelu do NotePanel w trybie edycji)
+--------------------------------------------------------------------------------
+Kliknięcie "Edytuj" w wierszu panelu: (1) zamyka panel weryfikacji, (2) otwiera
+wskazany temat w DashboardPage, (3) przełącza notatkę OD RAZU w tryb edycji.
+Realizowane parametrami URL (`?topic=<id>&edit=1`), NIE globalną zmienną —
+DashboardPage czyta te parametry, buduje `editRequest={topicId, nonce}` i
+przekazuje je do NotePanel, który w OSOBNYM efekcie (żeby nie resetować całego
+ładowania notatki) przełącza mode='edit', gdy topicId się zgadza i dany nonce
+nie był jeszcze skonsumowany (ref-guard — pozwala na drugie, niezależne
+żądanie edycji tego samego tematu, np. po tym jak poprzednie zostało anulowane).
+
+Samo kliknięcie "Edytuj" NIE potwierdza aktualności — to tylko wejście w tryb
+edycji. Jeśli użytkownik anuluje edycję (przycisk "Anuluj" w NotePanel), temat
+zostaje nieaktualny (actualityVerified pozostaje false), rekord zostaje w
+panelu. Wyłącznie UDANY zapis treści potwierdza aktualność — zob. punkt 13.
+
+
+13. ZAPIS TREŚCI NOTATKI TEŻ POTWIERDZA AKTUALNOŚĆ
+--------------------------------------------------------------------------------
+Jeśli użytkownik wybierze "Edytuj" (z panelu albo zwykłym przyciskiem edycji
+w NotePanel) i skutecznie zapisze treść, to liczy się jako świadome
+potwierdzenie — DOKŁADNIE tak samo jak osobny przycisk "Potwierdź aktualność".
+Dotyczy to zarówno PIERWSZEGO zapisu (temat NEW -> NOTE_ADDED), jak i KAŻDEJ
+kolejnej edycji.
+
+W NoteService#save, w TEJ SAMEJ transakcji JDBC co zapis/aktualizacja notatki,
+jeden atomowy UPDATE (TopicDao#markNoteSaved) ustawia jednocześnie: status
+tematu (jeśli trzeba), actuality_verified=TRUE,
+last_verification_of_actuality_date=teraz, i bumpuje version DOKŁADNIE RAZ na
+zapis (niezależnie od tego, czy status też się zmienił) — zob. też
+MULTITHREADING.txt, sekcja o NoteService#save. Nieudany/skonfliktowany zapis
+(HTTP 409 — ktoś inny zmienił temat w międzyczasie) NIE zmienia stanu
+aktualności — cała transakcja jest wycofywana.
+
+Zwracany/rozgłaszany jest ZAWSZE świeży TopicDto (zdarzenie WebSocket
+TOPIC_UPDATED z aktualnym version) — żadna otwarta karta nie zostaje ze starą
+wersją tematu. Samo otwarcie notatki albo samo wejście w tryb edycji (bez
+zapisu) NIE potwierdza niczego.
+
+
+14. TRZECIA DATA W DOKUMENCIE NOTATKI (ekran + PDF)
+--------------------------------------------------------------------------------
+Wszędzie, gdzie dotąd widniały dwie daty — "Utworzono" (Topic#createdAt) i
+"Treść od"/data pierwszego zapisu treści (Note#createdAt) — doszła TRZECIA,
+"Zweryfikowano":
+
+  - w nagłówku NotePanel (ekran) — zawsze widoczna (nie tylko gdy ustawiona),
+    z jawnym tekstem "Nigdy — termin liczony od utworzenia", gdy
+    lastVerificationOfActualityDate jest null,
+  - w PDF pojedynczej notatki (pdfGenerator.js, renderNoteHeader) — dodatkowa
+    linia "Ostatnio zweryfikowano" w metadanych nagłówka, tym samym stylem co
+    pozostałe daty, z tą samą regułą "Nigdy — termin liczony od utworzenia",
+  - w druku masowym (bulk PDF) — lastVerificationOfActualityDate jest
+    przekazywane do tych samych danych wejściowych co pozostałe pola tematu,
+    więc każda notatka w wydruku zbiorczym pokazuje swoją własną trzecią datę.
+
+Ta trzecia data to WYŁĄCZNIE odczyt topic.lastVerificationOfActualityDate —
+żaden z tych widoków sam niczego nie zmienia ani nie potwierdza.
+
+
+15. SYNCHRONIZACJA MIĘDZY KARTAMI (WebSocket)
+--------------------------------------------------------------------------------
+Trzy źródła zmiany stanu aktualności — ręczne potwierdzenie (punkt 9), udany
+zapis notatki (punkt 13), zbiorcze oznaczenie przez scheduler (punkt 8) —
+publikują dokładnie te same dwa rodzaje zdarzeń:
+
+  - TOPIC_UPDATED (już istniejące, pełny świeży TopicDto) — otwarty NotePanel
+    tego tematu w INNEJ karcie od razu widzi nowy version/actualityVerified/
+    lastVerificationOfActualityDate,
+  - ACTUALITY_REVIEW_CHANGED (nowe, lekkie: changedCount + topicIds, bez
+    treści notatek) — każdy OTWARTY panel "Weryfikacja aktualności" (w
+    dowolnej karcie, łącznie z tą, w której wykonano potwierdzenie) na to
+    zdarzenie po prostu odświeża swoją listę (GET actuality-review) —
+    "na wszelki wypadek", zamiast próbować ręcznie łatać stan po jednym ID.
+
+Efekt: jeśli jeden użytkownik potwierdzi rekord, znika on z panelu otwartego
+w INNEJ karcie/oknie, bez odświeżania strony. Zdarzenia są ZAWSZE publikowane
+PO udanym commicie transakcji (nigdy przed, nigdy przy błędzie) — zob.
+MULTITHREADING.txt.
+
+
+16. DIAGNOSTYKA / LOGI
+--------------------------------------------------------------------------------
+  - Start i koniec każdego przebiegu schedulera: poziom INFO, z liczbą
+    faktycznie zmienionych tematów ("marked N topic(s) as unverified").
+  - Pominięty przebieg (poprzedni wciąż trwa): WARNING.
+  - Błąd walidacji konfiguracji przy starcie: aplikacja się NIE uruchamia,
+    wyjątek trafia na konsolę/log startowy z jasnym opisem, która wartość
+    (period/cron/zone-id) jest błędna.
+  - Konflikt wersji przy ręcznym potwierdzeniu: WARNING w logu backendu,
+    HTTP 409 do klienta.
+
+
+17. PODEJŚCIE DO TESTÓW
+--------------------------------------------------------------------------------
+Backend (29 nowych testów, Clock wstrzykiwany wszędzie — ŻADNEGO Thread.sleep
+ani czekania na prawdziwy zegar; MutableClock pozwala przesunąć "teraz" już
+PO wstrzyknięciu, w trakcie pojedynczego testu):
+
+  - TopicDaoActualityTest (11) — migracja kolumn, mapowanie DAO/DTO, domyślne
+    wartości nowego tematu, markNoteSaved, confirmActuality, oraz SAM
+    markStaleAsUnverified: rekord dokładnie na granicy okresu (base + period
+    == teraz) staje się nieaktualny, młodszy rekord zostaje aktualny, rekord
+    już false nie jest ponownie dotykany, izolacja po user_id, sortowanie i
+    filtr po autorze w findForActualityReview.
+  - ActualityVerificationServiceTest (9) — data bazowa z createdAt vs. z daty
+    weryfikacji, inny okres niż domyślne 2 lata (np. P30D), ręczne
+    potwierdzenie ustawia boolean+datę, konflikt wersji -> 409, publikacja
+    zdarzenia WebSocket dopiero po commicie (asercja pośrednia: stan w bazie
+    jest już zaktualizowany, zanim metoda serwisu zwróci wynik — każdy błąd
+    SQL rzuciłby wyjątek PRZED dotarciem do publikacji).
+  - ActualityVerificationSchedulerTest (6) — walidacja konfiguracji w
+    konstruktorze (błędny period/cron/zone-id przerywa start), poprawne
+    wyliczenie następnego uruchomienia z crona+strefy, start/shutdown.
+  - NoteServiceActualityTest (3) — udany zapis notatki (pierwszy i kolejny)
+    potwierdza aktualność w TEJ SAMEJ transakcji; nieudany/skonfliktowany
+    zapis NIE zmienia stanu aktualności.
+
+Frontend (29 nowych testów, Vitest + Testing Library, WebSocket i API zawsze
+mockowane — bez prawdziwej sieci):
+
+  - FiltersPanel.test.jsx (8) — pełnoekranowy panel (brak dawnego
+    max-width:440px), kompaktowa siatka kryteriów, przewijana lista wyników
+    z pełnymi danymi wyniku (tytuł/autor/typ/poziom/ścieżka kategorii),
+    nawigacja po kliknięciu wyniku, stan błędu z ponowieniem, zamykanie
+    Escape/tłem.
+  - ActualityReviewPanel.test.jsx (14) — automatyczne pobranie listy przy
+    otwarciu, filtrowanie po autorze, pusta lista, błąd z ponowieniem, jawny
+    tekst "Nigdy...", modal PRZED wywołaniem API (i brak wywołania bez
+    potwierdzenia w modalu), Anuluj w modalu nie woła API, sukces usuwa
+    rekord z listy, konflikt 409 odświeża listę, inny błąd zostawia rekord i
+    modal, "Edytuj" nawiguje i NIE potwierdza, reakcja na zdarzenie WebSocket
+    ACTUALITY_REVIEW_CHANGED (i brak reakcji, gdy panel jest zamknięty),
+    zamykanie Escape.
+  - NotePanelActuality.test.jsx (7) — trzecia data "Zweryfikowano" (jawne
+    "Nigdy...", oraz sformatowana data obok "Utworzono"), editRequest
+    przełącza w tryb edycji tylko dla właściwego topicId, anulowanie edycji
+    po editRequest wraca do widoku bez wywołania zapisu, ten sam nonce nie
+    wymusza edycji drugi raz, nowy nonce dla tego samego tematu może wymusić
+    edycję ponownie.
+
+
+18. JAK ZMIENIĆ OKRES LUB HARMONOGRAM
+--------------------------------------------------------------------------------
+  1. Zmień odpowiednią wartość w config.properties (albo przez zmienną
+     środowiskową, jeśli tak jest skonfigurowane uruchomienie):
+       actuality.verification.period=P1Y      (np. rok zamiast 2 lat)
+       actuality.verification.cron=0 9 * * 1  (np. każdy poniedziałek 9:00)
+       actuality.verification.zone-id=Europe/Warsaw
+  2. Zrestartuj aplikację — konfiguracja jest czytana i walidowana WYŁĄCZNIE
+     przy starcie (constructor ActualityVerificationScheduler). Błędna
+     wartość ujawni się od razu jako przerwany start, z jawnym komunikatem,
+     która wartość jest niepoprawna.
+  3. Sprawdź log startowy: "Actuality verification scheduled: cron='...'
+     zone=... period=...". Jeśli actuality.verification.enabled=false,
+     zamiast tego pojawi się log, że scheduler jest wyłączony, i harmonogram
+     się NIE uruchomi (ręczne potwierdzenie i lista "do sprawdzenia" nadal
+     działają).
+  4. Zmiana okresu NIE przelicza retrospektywnie istniejących rekordów —
+     dopiero kolejny przebieg schedulera (wg nowego harmonogramu) zastosuje
+     nowy okres do wszystkich tematów actualityVerified=true.
+
+================================================================================

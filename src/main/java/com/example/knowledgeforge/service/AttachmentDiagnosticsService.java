@@ -20,7 +20,7 @@ import java.util.stream.Stream;
  *
  * Po przywróceniu starszego backupu bazy mogą się pojawić pliki na dysku, których rekordów
  * już nie ma w przywróconej bazie (backup NIE obejmuje attachments.storage.path) — to
- * oczekiwane i opisane w BACKUP_AND_RESTORE.txt, nie błąd tej diagnostyki.
+ * oczekiwane i opisane w dokumentacja/BACKUP_AND_RESTORE.txt, nie błąd tej diagnostyki.
  */
 public class AttachmentDiagnosticsService {
 
@@ -71,7 +71,7 @@ public class AttachmentDiagnosticsService {
             log.warning(() -> "Attachment diagnostics: " + missing.size() + " DB record(s) point to a missing file, "
                     + orphans.size() + " file(s) on disk have no DB record. This report is informational only — "
                     + "nothing was deleted. Can be expected after restoring an older database backup "
-                    + "(backups never include attachments.storage.path) — see BACKUP_AND_RESTORE.txt.");
+                    + "(backups never include attachments.storage.path) — see dokumentacja/BACKUP_AND_RESTORE.txt.");
         }
         return report;
     }

@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * DAO/mapowanie mechanizmu weryfikacji aktualności — zob. ACTUALITY_VERIFICATION.txt. Integracyjny,
+ * DAO/mapowanie mechanizmu weryfikacji aktualności — zob. dokumentacja/ACTUALITY_VERIFICATION.txt. Integracyjny,
  * łączy się z osobną bazą testową kf_test (TestDatabase), nigdy z bazą roboczą.
  */
 class TopicDaoActualityTest {

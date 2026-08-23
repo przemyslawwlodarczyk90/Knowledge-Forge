@@ -15,7 +15,7 @@ import java.util.concurrent.locks.ReentrantLock;
  *    aż spadnie do zera, zanim ruszy pg_restore,
  *  - {@code awaitingRestart} — trwały stan "restore się udał, ale pula połączeń nie została
  *    bezpiecznie odzyskana" — od tego momentu WSZYSTKIE żądania (także GET) dostają 503,
- *    aż proces zostanie ręcznie zrestartowany (zob. DatabaseRestoreService, BACKUP_AND_RESTORE.txt).
+ *    aż proces zostanie ręcznie zrestartowany (zob. DatabaseRestoreService, dokumentacja/BACKUP_AND_RESTORE.txt).
  */
 public class MaintenanceGate {
 

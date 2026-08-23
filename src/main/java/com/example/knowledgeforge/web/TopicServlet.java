@@ -29,7 +29,7 @@ import java.util.UUID;
  * GET /api/topics?author=&detailLevel=&categoryId= — filtr do panelu "Filtry".
  * GET /api/topics/authors — lista autorów do rozwijanego wyboru w filtrze.
  * GET /api/topics/actuality-review[?author=] — tematy wymagające sprawdzenia aktualności
- * (zob. ACTUALITY_VERIFICATION.txt). POST /api/topics/{id}/verify-actuality — ich ręczne
+ * (zob. dokumentacja/ACTUALITY_VERIFICATION.txt). POST /api/topics/{id}/verify-actuality — ich ręczne
  * potwierdzenie. Obie ścieżki sprawdzane PRZED ogólną obsługą /api/topics/{id}, żeby
  * "actuality-review" nie trafiło do parseUuid(...).
  */

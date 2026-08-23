@@ -30,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Zapis notatki (NoteService#save) jako świadome potwierdzenie aktualności tematu —
- * zob. ACTUALITY_VERIFICATION.txt punkt 6. Udany zapis (pierwszy i kolejny) musi ustawić
+ * zob. dokumentacja/ACTUALITY_VERIFICATION.txt punkt 6. Udany zapis (pierwszy i kolejny) musi ustawić
  * actualityVerified=true + świeżą lastVerificationOfActualityDate; nieudany (409) nie może
  * ruszyć stanu aktualności.
  */

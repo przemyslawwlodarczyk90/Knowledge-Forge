@@ -161,7 +161,7 @@ public class AppConfig {
     }
 
     // ===============================
-    // WERYFIKACJA AKTUALNOŚCI NOTATEK (zob. ACTUALITY_VERIFICATION.txt)
+    // WERYFIKACJA AKTUALNOŚCI NOTATEK (zob. dokumentacja/ACTUALITY_VERIFICATION.txt)
     // ===============================
 
     public boolean actualityVerificationEnabled() {
@@ -200,6 +200,41 @@ public class AppConfig {
         } catch (java.time.DateTimeException e) {
             throw new IllegalStateException(
                     "Invalid actuality.verification.zone-id '" + raw + "' — expected a valid IANA zone id, "
+                            + "e.g. Europe/Warsaw", e);
+        }
+    }
+
+    // ===============================
+    // CODZIENNY ZBIORCZY BACKUP NOTATEK/INSTRUKCJI (.kfbundle) — zob. dokumentacja/BACKUP_STRATEGY.txt
+    // ===============================
+
+    public boolean noteBundleBackupEnabled() {
+        return Boolean.parseBoolean(get("note-bundle-backup.enabled", "true"));
+    }
+
+    /**
+     * Folder na dysku (ŚCIEŻKA SYSTEMOWA, nie URL) dla jedynego, stale nadpisywanego pliku
+     * knowledge-forge-notes-latest.kfbundle (i tymczasowego .kfbundle.part w trakcie tworzenia).
+     * Celowo INNY katalog niż {@link #notesStoragePath()} — walidowana zgodność w konstruktorze
+     * NoteBundleBackupService (zob. tam), nie tutaj.
+     */
+    public String noteBundleBackupDirectory() {
+        return get("note-bundle-backup.directory", "./data/note-bundle-backups");
+    }
+
+    /** Surowy, pięciopolowy wyraz cron — parsowany i walidowany w NoteBundleBackupScheduler (jedyne miejsce zależne od cron-utils). */
+    public String noteBundleBackupCron() {
+        return get("note-bundle-backup.cron", "30 17 * * *");
+    }
+
+    /** Strefa czasowa harmonogramu — jawna, niezależna od strefy serwera/OS. */
+    public ZoneId noteBundleBackupZoneId() {
+        String raw = get("note-bundle-backup.zone-id", "Europe/Warsaw");
+        try {
+            return ZoneId.of(raw);
+        } catch (java.time.DateTimeException e) {
+            throw new IllegalStateException(
+                    "Invalid note-bundle-backup.zone-id '" + raw + "' — expected a valid IANA zone id, "
                             + "e.g. Europe/Warsaw", e);
         }
     }

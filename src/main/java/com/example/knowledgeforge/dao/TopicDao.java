@@ -212,7 +212,7 @@ public class TopicDao {
             ps.setTimestamp(11, Timestamp.from(topic.getUpdatedAt()));
             ps.setInt(12, topic.getVersion());
             // Nowo tworzony temat zawsze startuje jako aktualny, bez daty potwierdzenia — zob.
-            // Topic#actualityVerified (domyślne pole Javy = true) i ACTUALITY_VERIFICATION.txt.
+            // Topic#actualityVerified (domyślne pole Javy = true) i dokumentacja/ACTUALITY_VERIFICATION.txt.
             ps.setBoolean(13, topic.isActualityVerified());
             ps.setTimestamp(14, topic.getLastVerificationOfActualityDate() == null
                     ? null : Timestamp.from(topic.getLastVerificationOfActualityDate()));
@@ -318,7 +318,7 @@ public class TopicDao {
         return topic;
     }
 
-    // ── Weryfikacja aktualności (zob. ACTUALITY_VERIFICATION.txt) ──────────────────────────────
+    // ── Weryfikacja aktualności (zob. dokumentacja/ACTUALITY_VERIFICATION.txt) ──────────────────────────────
 
     /**
      * Ręczne potwierdzenie aktualności (POST .../verify-actuality) — WYŁĄCZNIE pola aktualności,

@@ -1,0 +1,440 @@
+================================================================================
+Knowledge-Forge — Strategia ochrony danych (wszystkie poziomy backupu)
+================================================================================
+
+Ten dokument to NADRZĘDNY opis WSZYSTKICH mechanizmów ochrony danych w aplikacji —
+cztery niezależne, uzupełniające się poziomy. Szczegóły poziomu 1 opisuje osobno
+dokumentacja/BACKUP_AND_RESTORE.txt (backup samej bazy PostgreSQL) — tutaj są
+streszczone, żeby ten dokument dawał pełny obraz od razu, bez przeskakiwania
+między plikami.
+
+Poziomy NIE są od siebie zależne — każdy chroni przed inną klasą awarii, i każdy
+z osobna wystarcza do odzyskania SWOJEGO zakresu danych:
+
+  1. PostgreSQL (pg_dump)         — rekordy w bazie (tematy, kategorie, metadane).
+  2. Pojedyncze pliki .kfdoc      — treść JEDNEJ notatki/instrukcji, na dysku.
+  3. Codzienny zbiorczy .kfbundle — WSZYSTKIE .kfdoc naraz, niezależnie od bazy.
+  4. Panel ratunkowy w przeglądarce — odczyt poziomu 2 i 3 BEZ działającej aplikacji/bazy.
+
+
+1. POZIOM 1 — POSTGRESQL (pg_dump)
+--------------------------------------------------------------------------------
+Pełny opis: dokumentacja/BACKUP_AND_RESTORE.txt. Streszczenie:
+
+  - automatyczny "pg_dump -Fc" (format custom, binarny, skompresowany);
+  - katalog: backup.directory (domyślnie ./data/database-backups);
+  - harmonogram: codziennie o backup.schedule-hour:backup.schedule-minute
+    (domyślnie 02:00), w lokalnej strefie czasowej systemu;
+  - retencja: backup.retention-days (domyślnie 14 dni), NAJNOWSZY plik nigdy
+    nie jest usuwany niezależnie od wieku;
+  - restore: DatabaseRestoreService, WYŁĄCZNIE przez /api/admin/backups/restore,
+    zablokowany domyślnie (backup.restore.enabled=false) i chroniony sekretem
+    w nagłówku X-Restore-Secret (backup.restore.secret, pochodzącym WYŁĄCZNIE
+    ze zmiennej środowiskowej BACKUP_RESTORE_SECRET — nigdy z repozytorium);
+  - endpoint administracyjny NIE jest widoczny w żadnym menu/UI — świadomie.
+
+WAŻNE: dump PostgreSQL zawiera WYŁĄCZNIE rekordy z bazy (tematy, kategorie,
+metadane notatek/załączników, relacje). NIE zawiera fizycznej treści notatek
+(.kfdoc, poziom 2) ani plików załączników (attachments.storage.path) — oba
+leżą osobno na dysku i wymagają OSOBNEJ ochrony (poziomy 2-4 poniżej, plus
+uwaga o attachments w sekcji "Świadome ograniczenia").
+
+
+2. POZIOM 2 — POJEDYNCZE PLIKI .KFDOC
+--------------------------------------------------------------------------------
+Każda notatka/instrukcja ma swój plik <topicId>.kfdoc pod notes.storage.path
+(domyślnie ./data/notes) — baza trzyma tylko ścieżkę (note.content_path).
+
+Format kontenera (java.util.zip, zero dodatkowych zależności — zob.
+com.example.knowledgeforge.document.DocumentContainer):
+
+  manifest.json      {"format":"kfdoc","version":1,"metadata":{...}}
+  content.json       drzewo dokumentu edytora (ProseMirror/TipTap JSON)
+  assets/<nazwa>      obrazy wklejone do treści, referencjonowane z
+                      content.json przez "asset:<nazwa>" zamiast base64 w środku
+
+"metadata" w manifeście niesie jawne pola z encji (topicId, noteId, title,
+shortPrompt, author, type, detailLevel, categoryId, categoryName, daty,
+wersję notatki) — plik jest więc SAMODZIELNĄ sumą metadanych + treści, nie
+tylko surowym contentem, i da się go otworzyć/zrozumieć bez bazy.
+
+Od tej wersji manifest niesie DODATKOWO pełną ścieżkę kategorii (root -> liść),
+wyznaczaną raz przy zapisie (NoteService#categoryPath, chodzi po parent_id
+przez CategoryDao):
+
+  "categoryPath": ["IT", "Java", "Kolekcje"]
+
+Zmiana jest WSTECZNIE KOMPATYBILNA — starszy .kfdoc bez tego pola nadal się
+otwiera poprawnie, zarówno w aplikacji jak i w panelu ratunkowym (poziom 4):
+odczyt spada z powrotem na pojedyncze categoryName, a przy jego braku na pustą
+ścieżkę. Zob. NoteFileStorageTest / emergencyRecovery.test.js.
+
+Plik jest NADPISYWANY przy każdym kolejnym zapisie treści — .kfdoc NIE jest
+historią wersji, tylko jednym, aktualnym stanem (analogicznie do note.version
+w bazie, który rośnie przy każdym zapisie, ale nie przechowuje poprzednich
+treści).
+
+Zapis jest ATOMOWY (NoteFileStorage#writeContent): treść trafia najpierw do
+pliku tymczasowego o UNIKALNEJ nazwie (<topicId>.<losowy UUID>.tmp) w TYM
+SAMYM katalogu, dopiero potem ATOMIC_MOVE (z bezpiecznym fallbackiem
+REPLACE_EXISTING, gdy system plików nie wspiera atomowego przenoszenia)
+podmienia plik docelowy. Dzięki temu codzienny skan katalogu (poziom 3) ZAWSZE
+trafia albo na poprzednią, albo na nową KOMPLETNĄ wersję pliku — nigdy na
+połowicznie zapisaną zawartość, nawet gdyby backup zbiorczy uruchomił się
+dokładnie w trakcie zapisu notatki. Unikalna (nie stała) nazwa tymczasowa
+oznacza też, że dwa równoległe zapisy RÓŻNYCH tematów nigdy nie kolidują o ten
+sam plik .tmp.
+
+Plik .kfdoc można otworzyć RĘCZNIE dowolnym archiwizatorem ZIP (Eksplorator
+Windows, 7-Zip, `unzip`) — to zwykły ZIP z czytelnym JSON-em w środku, bez
+żadnego własnego narzędzia do "odszyfrowania". Treść notatki NIE zależy od
+bazy — jeśli plik istnieje na dysku, da się go odczytać (ręcznie albo przez
+panel ratunkowy, poziom 4) nawet gdy rekord w bazie zniknął.
+
+
+3. POZIOM 3 — CODZIENNY ZBIORCZY .KFBUNDLE
+--------------------------------------------------------------------------------
+Realizuje: com.example.knowledgeforge.backup.NoteBundleBackupService +
+NoteBundleBackupScheduler.
+
+3.1. Zasada nadrzędna — niezależność od bazy
+Backup zbiorczy skanuje notes.storage.path BEZPOŚREDNIO Z DYSKU (metoda
+`scanDocuments`, `Files.newDirectoryStream(notesDir, "*.kfdoc")`) — NIGDY nie
+odpytuje tabeli `note` ani `topic`. To celowe i sprawdzone (zob.
+NoteBundleBackupServiceTest#service_has_no_dependency_on_any_database_access_class
+— test przez refleksję potwierdza, że klasa nie ma ani jednego pola/parametru
+typu *Dao/DataSource). Dzięki temu backup zbiorczy znajduje KAŻDY fizycznie
+istniejący .kfdoc, nawet gdy:
+  - w bazie brakuje odpowiadającego rekordu (temat usunięty, plik osierocony);
+  - note.content_path jest błędny/nieaktualny;
+  - tabela note albo topic została usunięta;
+  - cała baza jest pusta albo uszkodzona.
+
+3.2. Jeden plik, bezpiecznie nadpisywany — BEZ historii
+W katalogu backupu (note-bundle-backup.directory) istnieje ZAWSZE co najwyżej
+jeden właściwy plik:
+
+  knowledge-forge-notes-latest.kfbundle
+
+Świadomie BEZ nazw z datą w środku, BEZ retencji, BEZ przechowywania wielu
+wersji — każde zaplanowane uruchomienie tworzy nową wersję zawierającą
+AKTUALNY komplet wszystkich .kfdoc i bezpiecznie zastępuje nią poprzednią.
+
+Procedura bezpiecznego nadpisania (NoteBundleBackupService#doBackup):
+  1. skanuje notes.storage.path, buduje manifest.json + index.json + kopiuje
+     każdy .kfdoc do documents/<topicId>.kfdoc wewnątrz nowego archiwum;
+  2. zapisuje WYŁĄCZNIE do pliku tymczasowego
+     knowledge-forge-notes-latest.kfbundle.part (NIGDY wprost do pliku
+     docelowego — awaria w trakcie zapisu zniszczyłaby jedyną kopię);
+  3. zamyka strumień ZIP;
+  4. WALIDUJE gotowe archiwum: ponownie je otwiera, sprawdza obecność i
+     poprawność manifest.json/index.json, format="kfbundle", oraz że liczba
+     wpisów documents/* zgadza się z liczbą zeskanowanych plików;
+  5. dopiero PO poprawnej walidacji — ATOMIC_MOVE z REPLACE_EXISTING (fallback
+     na sam REPLACE_EXISTING, gdy system plików nie wspiera ATOMIC_MOVE)
+     podmienia plik docelowy.
+
+Jeżeli generowanie ALBO walidacja się nie powiedzie: plik .part jest usuwany,
+POPRZEDNI poprawny .kfbundle zostaje NIETKNIĘTY, pełny błąd trafia do logu.
+Przez krótki czas samego generowania na dysku mogą istnieć jednocześnie stary,
+wciąż poprawny .kfbundle ORAZ nowy .part — to konieczne, żeby nie stracić
+jedynej poprawnej kopii przy awarii zapisu w trakcie. Po udanej zamianie
+zostaje dokładnie jeden plik.
+
+Przy STARCIE aplikacji (NoteBundleBackupScheduler#start, przed sprawdzeniem
+note-bundle-backup.enabled) osierocony .part (pozostały po przerwanym procesie)
+jest USUWANY — nigdy nie jest traktowany jako coś możliwego do odzyskania.
+Poprawny knowledge-forge-notes-latest.kfbundle nie jest przy tym w żaden sposób
+dotykany.
+
+RPO (maksymalna utrata danych): około JEDNEGO DNIA — tyle, ile mija między
+kolejnymi udanymi przebiegami harmonogramu. Nadpisanie oznacza, że NIE MOŻNA
+wrócić do starszej wersji bundle — jeśli uszkodzenie pojedynczej notatki
+zostanie niezauważone i przetrwa do kolejnego poprawnego backupu, to
+uszkodzenie zostaje w nim UTRWALONE (backup kopiuje to, co faktycznie leży na
+dysku, nie ocenia poprawności treści).
+
+3.3. Format .kfbundle
+Wersjonowany, ZIP z jawnym manifestem (rozpoznawany po ZAWARTOŚCI, nie
+rozszerzeniu pliku — zob. poziom 4):
+
+  manifest.json
+  index.json
+  documents/<topicId>.kfdoc
+  documents/<topicId>.kfdoc
+  ...
+
+manifest.json:
+  {
+    "format": "kfbundle",
+    "version": 1,
+    "createdAt": "2026-08-23T14:12:00.036453600Z",
+    "documentCount": 13,
+    "corruptedCount": 0,
+    "generator": "Knowledge Forge 2.0"
+  }
+
+index.json — uporządkowana lista dokumentów, każdy wpis niesie: fileName,
+topicId, noteId, title, author, type, detailLevel, categoryName, categoryPath,
+savedAt, noteVersion, sizeBytes, sha256 (SHA-256 SUROWYCH bajtów pliku .kfdoc
+— do weryfikacji integralności przy odczycie, zob. poziom 4), corrupted
+(boolean), error (opis błędu albo null).
+
+Sortowanie jest STABILNE: ścieżka/nazwa kategorii, typ, tytuł, topicId —
+ta sama kolejność przy każdym przebiegu dla tych samych danych wejściowych.
+
+3.4. Uszkodzone i starsze pliki — backup NIGDY nie przerywa się w całości
+Jeżeli pojedynczy .kfdoc jest uszkodzony (nieprawidłowy ZIP, brak
+manifest.json/content.json wewnątrz) — jego SUROWA kopia i tak trafia do
+archiwum (documents/*), ale w index.json dostaje corrupted:true i opis błędu
+w error. W trybie ratunkowym lepiej zachować za dużo niż utracić część treści.
+Starsze pliki bez pełnych metadanych (np. sprzed dodania categoryPath) są
+dołączane normalnie — brakujące pola w indeksie po prostu zostają null/puste.
+Żaden pojedynczy zły plik NIE przerywa całego backupu — liczba uszkodzonych
+trafia do logu i do manifest.json (corruptedCount).
+
+3.5. Konfiguracja (config.properties, każda wartość dostępna też przez
+odpowiadającą zmienną środowiskową, konwencja kropka/myślnik -> podkreślnik,
+wielkie litery — np. note-bundle-backup.cron -> NOTE_BUNDLE_BACKUP_CRON):
+
+  note-bundle-backup.enabled=true
+      Wyłącza WYŁĄCZNIE harmonogram — sprzątanie osieroconego .part przy
+      starcie działa niezależnie od tej flagi.
+
+  note-bundle-backup.directory=./data/note-bundle-backups
+      Ścieżka SYSTEMOWA (katalog na dysku), NIE adres HTTP. Musi być INNA niż
+      notes.storage.path — walidowane w konstruktorze NoteBundleBackupService,
+      błędna wartość przerywa start aplikacji jawnym wyjątkiem (backup żyjący
+      w katalogu, który sam ma chronić, nie jest backupem).
+
+  note-bundle-backup.cron=30 17 * * *
+      Pięciopolowy cron UNIX, domyślnie "codziennie o 17:30". Parsowany i
+      walidowany biblioteką com.cronutils:cron-utils (ta sama, już użyta przy
+      weryfikacji aktualności — zob. dokumentacja/ACTUALITY_VERIFICATION.txt),
+      bez ręcznie pisanego parsera.
+
+  note-bundle-backup.zone-id=Europe/Warsaw
+      Strefa czasowa harmonogramu — jawna, niezależna od strefy serwera/OS.
+
+Wszystkie trzy (directory, cron, zone-id) są walidowane w konstruktorze
+NoteBundleBackupScheduler BEZWARUNKOWO, niezależnie od `enabled` — błędna
+wartość zawsze przerywa start aplikacji jawnym, zrozumiałym wyjątkiem, zamiast
+po cichu wyłączać mechanizm (ten sam wzorzec co scheduler weryfikacji
+aktualności i backup bazy).
+
+Jeżeli note-bundle-backup.directory i notes.storage.path leżą na TYM SAMYM
+fizycznym dysku/wolumenie (sprawdzane przy starcie przez porównanie
+Files.getFileStore) — zapisywane jest wyraźne OSTRZEŻENIE w logu startowym.
+Najlepszą ochronę daje osobny wolumen albo udział sieciowy — backup i oryginał
+na jednym dysku nie chronią przed awarią całego dysku (zob. "Świadome
+ograniczenia" niżej).
+
+3.6. Harmonogram (NoteBundleBackupScheduler) — wzorzec identyczny jak backup
+bazy i weryfikacja aktualności (zob. dokumentacja/MULTITHREADING.txt):
+  - pojedynczy, dedykowany wątek-demon "note-bundle-backup-scheduler";
+  - każdy przebieg liczy czas do NASTĘPNEGO uruchomienia na nowo (na podstawie
+    crona i strefy), zamiast stałego interwału — odporne na zmiany czasu
+    letni/zimowy;
+  - AtomicBoolean w serwisie (nie w schedulerze) pilnuje, żeby dwa przebiegi
+    NIGDY nie ruszyły równolegle — chroni zarówno harmonogram, jak i
+    ewentualny przyszły ręczny trigger tym samym mechanizmem;
+  - loguje jawnie start, koniec (z liczbą dokumentów i uszkodzonych) i błędy;
+  - NIE blokuje wątku HTTP — działa całkowicie osobno;
+  - NIE wymaga połączenia z bazą (zob. 3.1);
+  - poprawnie uruchamiany i zatrzymywany w Main.java (start() zaraz po
+    backupService.start(), shutdown() w shutdown hooku razem z resztą).
+
+
+4. POZIOM 4 — ODZYSKANIE PRZEZ PRZEGLĄDARKĘ (PANEL RATUNKOWY)
+--------------------------------------------------------------------------------
+Przycisk "Wczytaj dane binarne" w menu bocznym (pod "Weryfikacja aktualności")
+— otwiera pełnoekranowy panel (EmergencyRecoveryPanel.jsx, ten sam współdzielony
+layout co Filtry/Weryfikacja aktualności, zob. dokumentacja/ACTUALITY_VERIFICATION.txt).
+
+4.1. Lokalne przetwarzanie — ZERO requestów sieciowych
+Wybrany plik (pole wyboru ALBO przeciągnięcie/drop) jest odczytywany
+WYŁĄCZNIE w przeglądarce (frontend/src/utils/emergencyRecovery.js) — nigdy nie
+trafia do backendu. To jedyny sposób, żeby mechanizm ratunkowy działał również
+przy PUSTEJ albo USZKODZONEJ bazie: nie ma tu żadnego endpointu HTTP zależnego
+od działającej warstwy danych, więc nie ma czego "nie mieć". Zweryfikowane
+testem (emergencyRecovery.test.js — `fetch` podmieniony na spy, potwierdzone
+że NIGDY nie jest wołany) oraz ręcznie (zob. punkt 6 poniżej).
+
+Rozpakowywanie ZIP przez `fflate` (mała, aktywnie utrzymywana biblioteka bez
+zależności) — świadomie NIE własny, ręcznie pisany parser ZIP.
+
+4.2. Rozpoznawanie formatu
+Oba formaty (.kfdoc, .kfbundle) są rozpoznawane po polu "format" w
+manifest.json wewnątrz archiwum, NIE po rozszerzeniu pliku wybranego przez
+użytkownika.
+
+4.3. Walidacja i limity bezpieczeństwa (emergencyRecovery.js)
+Chronią przed przypadkowym wczytaniem ogromnego pliku, ZIP bombami,
+zawieszeniem przeglądarki, uszkodzonym archiwum i path traversalem:
+
+  MAX_KFDOC_INPUT_BYTES            100 MB   — pojedynczy plik .kfdoc
+  MAX_KFBUNDLE_INPUT_BYTES         600 MB   — zbiorczy plik .kfbundle
+  MAX_DOCUMENTS_IN_BUNDLE          5000     — liczba dokumentów w jednym bundle
+  MAX_ASSETS_PER_DOCUMENT          200      — liczba obrazów w jednej notatce
+  MAX_SINGLE_ASSET_BYTES           25 MB    — pojedynczy obraz po rozpakowaniu
+  MAX_TOTAL_UNCOMPRESSED_BYTES     1.5 GB   — suma rozpakowanych obrazów
+
+Sprawdzane: sygnatura ZIP (nagłówek "PK"), obecność manifest.json, pole
+"format", pole "version" (obsługiwana wyłącznie wersja 1 — inna jawnie
+odrzucana), obecność content.json (dla .kfdoc) / index.json (dla .kfbundle),
+liczba wpisów, rozmiar po rozpakowaniu, poprawność JSON, oraz BRAK
+niedozwolonych ścieżek (".." / bezwzględne / z literą dysku Windows) w nazwach
+wpisów wewnątrz archiwum. Przekroczenie limitu przerywa przetwarzanie z
+czytelnym komunikatem — świadomie BEZ próby częściowego przetworzenia
+archiwum po przekroczeniu limitu bezpieczeństwa.
+
+Znany, zaakceptowany kompromis: odczyt używa synchronicznego `unzipSync`
+(cały plik naraz), więc górnym ograniczeniem faktycznego kosztu rozpakowania
+jest sam limit rozmiaru pliku WEJŚCIOWEGO (600 MB) — nie ma dodatkowej,
+strumieniowej inspekcji zadeklarowanych rozmiarów wpisów PRZED pełnym
+rozpakowaniem. Uznane za wystarczające dla realnych rozmiarów backupów tej
+aplikacji (rząd dziesiątek-set MB, zob. przykład w punkcie 6).
+
+4.4. Podgląd pojedynczego .kfdoc
+Po wybraniu poprawnego pliku: odczyt manifestu + content.json, odtworzenie
+obrazów z assets/* jako lokalne Blob URL (URL.createObjectURL — NIE base64
+w pamięci, NIE żaden request), podmiana "asset:nazwa" -> Blob URL w kopii
+content.json (rewriteAssetRefs — odpowiednik backendowego
+DocumentContainer#rewriteImageSrc), przekazanie do ISTNIEJĄCEGO generatora PDF
+(generateSingleNotePdf z pdfGenerator.js, opts.output='blob' — ta sama
+funkcja, której używa zwykły "Pobierz PDF" w NotePanel, żadnego drugiego,
+niezależnego renderera).
+
+Wynikowy PDF otwiera się jako Blob URL w NOWEJ KARCIE (window.open) —
+natywny podgląd PDF przeglądarki, użytkownik może przeczytać, wydrukować,
+zapisać. Automatyczne okno drukowania NIE jest wywoływane. Jeśli przeglądarka
+zablokuje nową kartę (window.open zwraca null) — panel pokazuje czytelny
+komunikat i przycisk pobrania tego samego Blob URL (<a download>). Blob URL
+wejściowych obrazów są zwalniane (URL.revokeObjectURL) zaraz PO wygenerowaniu
+PDF-a (bajty obrazów są już "wypieczone" w PDF) — Blob URL samego PDF-a NIE
+jest zwalniany, dopóki nowa karta może go jeszcze potrzebować.
+
+4.5. Podgląd zbiorczego .kfbundle
+Odczyt manifestu + index.json, dla KAŻDEGO wpisu: weryfikacja sumy SHA-256
+(Web Crypto, `crypto.subtle.digest`) surowych bajtów wobec wartości z indeksu,
+odczyt wewnętrznego .kfdoc (ten sam kod co 4.4), w kolejności z indeksu.
+Wykorzystywany jest ISTNIEJĄCY generator zbiorczy (generateBulkNotesPdf) —
+każda notatka zaczyna się od nowej strony/sekcji z tytułem, typem, autorem,
+ścieżką kategorii, datą i treścią (dokładnie jak przy zwykłym druku masowym
+z aplikacji, zob. dokumentacja druku masowego w kodzie pdfGenerator.js).
+
+Jeżeli część wpisów jest uszkodzona (oznaczone corrupted:true w indeksie,
+niezgodna suma SHA-256, brakujący plik w archiwum, nieczytelny wewnętrzny ZIP)
+— NIE są pomijane po cichu: panel pokazuje listę problemów (nazwa/tytuł +
+przyczyna), liczbę poprawnych i uszkodzonych dokumentów, i wymaga świadomego
+kliknięcia "Wygeneruj mimo to" (zamiast zwykłego "Otwórz podgląd PDF")
+zanim cokolwiek się wygeneruje — użytkownik może też Anulować. Wygenerowany
+PDF dostaje dodatkowo PIERWSZĄ stronę "Raport importu — pominięte dokumenty"
+z listą wszystkich problemów (ten sam generator, ten sam mechanizm co zwykła
+notatka — zob. buildIssuesReportNoteData w EmergencyRecoveryPanel.jsx). Jeśli
+WSZYSTKIE dokumenty w bundlu są nieczytelne, panel jawnie o tym informuje i
+nie pozwala nacisnąć przycisku generowania (nie ma z czego).
+
+4.6. Czego panel ratunkowy NIE robi
+To funkcja WYŁĄCZNIE odczytu i eksportu do PDF. Nie zapisuje niczego w bazie,
+nie odtwarza automatycznie tabel/rekordów, nie wysyła niczego na serwer.
+"Odzyskanie" oznacza tutaj: możliwość odczytania, wydrukowania i zapisania
+treści jako PDF — nie automatyczny import do aplikacji.
+
+
+5. MACIERZ AWARII — CZEGO UŻYĆ, GDY...
+--------------------------------------------------------------------------------
+  Zniknie pojedynczy rekord topic/note w bazie
+      -> Plik .kfdoc na dysku wciąż istnieje (poziom 2) — otwórz go panelem
+         ratunkowym (poziom 4) i wydrukuj/zapisz jako PDF. Sam rekord w bazie
+         trzeba odtworzyć ręcznie (poza zakresem tego mechanizmu, zob. 4.6).
+
+  Uszkodzi się content_path w bazie
+      -> Identycznie jak wyżej — plik .kfdoc jest identyfikowany przez samą
+         swoją nazwę na dysku (<topicId>.kfdoc), nie przez wartość w bazie.
+
+  Zniknie tabela note
+      -> Backup zbiorczy (poziom 3) w ogóle NIE korzysta z tej tabeli —
+         najnowszy knowledge-forge-notes-latest.kfbundle wciąż zawiera pełną,
+         aktualną (na dzień ostatniego przebiegu) treść wszystkich notatek.
+         Otwórz go panelem ratunkowym.
+
+  Zniknie tabela topic
+      -> Jak wyżej — .kfbundle jest budowany ze skanu dysku, nie z topic.
+
+  Uszkodzi się cała baza
+      -> Najpierw spróbuj poziomu 1 (restore z pg_dump, zob.
+         BACKUP_AND_RESTORE.txt). Jeśli to niemożliwe/niewystarczające — treść
+         notatek wciąż jest dostępna przez poziom 2/3/4, niezależnie od stanu
+         bazy.
+
+  Nie zadziała dump PostgreSQL (brak/uszkodzony/przestarzały)
+      -> Rekordów bazy (kategorie, metadane, relacje) NIE da się odtworzyć
+         automatycznie tym mechanizmem — ale sama TREŚĆ notatek jest wciąż
+         bezpieczna w .kfdoc/.kfbundle. Ręczna rekonstrukcja struktury bazy
+         (kategorie, tematy) na podstawie odczytanej treści jest jedyną drogą
+         w tym scenariuszu.
+
+  Uszkodzi się pojedynczy plik .kfdoc
+      -> Jeśli backup zbiorczy zdążył go objąć PRZED uszkodzeniem — otwórz
+         knowledge-forge-notes-latest.kfbundle, ten konkretny wpis i tak
+         zostanie oznaczony corrupted:true, ale reszta bundla jest
+         nienaruszona (zob. 3.4). Jeśli uszkodzenie nastąpiło PRZED backupem —
+         bundle też będzie miał ten wpis uszkodzony (RPO ~1 dzień, zob. 3.2).
+
+  Zniknie CAŁY katalog notatek (notes.storage.path)
+      -> Jedyne źródło to najnowszy knowledge-forge-notes-latest.kfbundle
+         (poziom 3) — pod warunkiem, że leży na INNYM wolumenie/dysku niż
+         notes.storage.path (zob. ostrzeżenie w 3.5/7). Jeśli oba katalogi
+         były na tym samym dysku, który uległ awarii — utracone jest WSZYSTKO
+         (stąd rekomendacja osobnego wolumenu/udziału sieciowego, zob. niżej).
+
+
+6. KOLEJNOŚĆ ODTWARZANIA
+--------------------------------------------------------------------------------
+  1. Jeśli dump PostgreSQL działa: przywróć bazę (poziom 1, zob.
+     BACKUP_AND_RESTORE.txt) — odzyskuje rekordy (kategorie, tematy, metadane).
+  2. Przywróć katalogi plików (notes.storage.path, attachments.storage.path)
+     z ich własnych kopii systemu plików, jeśli takie istnieją.
+  3. Jeśli baza lub ścieżki plików nie działają / nie są dostępne: użyj
+     najnowszego knowledge-forge-notes-latest.kfbundle (poziom 3) — otwórz go
+     panelem ratunkowym (poziom 4).
+  4. Wygeneruj ratunkowy PDF (pojedynczy albo zbiorczy) — to NAJPEWNIEJSZY,
+     zawsze dostępny sposób odzyskania samej TREŚCI, niezależnie od stanu
+     reszty systemu.
+  5. Jeśli automatyczne odtworzenie na żadnym z powyższych poziomów nie jest
+     dostępne — jedyną drogą pozostaje ręczna rekonstrukcja danych na
+     podstawie tego, co udało się odczytać/wydrukować.
+
+
+7. ŚWIADOME OGRANICZENIA
+--------------------------------------------------------------------------------
+  - Cache przeglądarki NIE jest backupem — nie polegaj na nim w żadnym
+    scenariuszu odzyskiwania.
+  - .kfbundle NIE odtwarza automatycznie rekordów bazy — panel ratunkowy to
+    wyłącznie odczyt + eksport do PDF (zob. 4.6). Import z powrotem do bazy
+    świadomie NIE jest częścią tego mechanizmu.
+  - Zewnętrzne załączniki z attachments.storage.path (nagrania, arkusze,
+    dokumenty, archiwa...) NIE znajdują się w .kfdoc — .kfdoc zawiera
+    WYŁĄCZNIE obrazy OSADZONE bezpośrednio w treści notatki (wklejone do
+    edytora). Osobny backup katalogu attachments.storage.path nadal jest
+    potrzebny — ten mechanizm go NIE obejmuje (zob. też BACKUP_AND_RESTORE.txt,
+    sekcja "Czego backup nie obejmuje").
+  - Przechowywanie bazy, .kfdoc i .kfbundle na JEDNYM dysku/wolumenie NIE
+    chroni przed awarią całego tego dysku — wszystkie trzy poziomy zginęłyby
+    naraz. Przynajmniej jedna kopia (najlepiej note-bundle-backup.directory,
+    poziom 3 — pojedynczy plik, łatwy do skopiowania w całości) powinna
+    znajdować się na osobnym dysku, wolumenie sieciowym albo zewnętrznym
+    zasobie. Aplikacja WYKRYWA i OSTRZEGA w logu startowym, gdy
+    note-bundle-backup.directory i notes.storage.path leżą na tym samym
+    fizycznym wolumenie (zob. 3.5) — to ostrzeżenie warto potraktować
+    poważnie w środowisku produkcyjnym.
+  - RPO backupu zbiorczego (poziom 3) to ok. JEDEN DZIEŃ — zmiany od
+    ostatniego udanego przebiegu do awarii są nieodwracalnie utracone na tym
+    poziomie (choć wciąż mogą być bezpieczne na poziomie 2, jeśli sam plik
+    .kfdoc przetrwał).
+  - Nadpisywanie jedynego .kfbundle (świadoma decyzja — zob. 3.2) oznacza
+    brak możliwości powrotu do STARSZEJ wersji zbiorczego backupu, gdyby
+    okazało się, że najnowsza zawiera niezauważone wcześniej uszkodzenie.
+
+================================================================================

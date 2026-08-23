@@ -81,7 +81,7 @@ public final class Schema {
             "ALTER TABLE topic DROP CONSTRAINT IF EXISTS topic_status_check",
             "UPDATE topic SET status = 'NOTE_ADDED' WHERE status IN ('NOTE_GENERATED', 'QUIZ_READY', 'PASSED', 'MASTERED')",
 
-            // Weryfikacja aktualności (zob. ACTUALITY_VERIFICATION.txt) — DEFAULT TRUE oznacza, że
+            // Weryfikacja aktualności (zob. dokumentacja/ACTUALITY_VERIFICATION.txt) — DEFAULT TRUE oznacza, że
             // WSZYSTKIE istniejące rekordy po migracji startują jako aktualne, z pustą datą
             // potwierdzenia (termin liczy się wtedy od created_at — zob.
             // ActualityVerificationService). Świadomie NIE ustawiamy im sztucznej daty "teraz" —

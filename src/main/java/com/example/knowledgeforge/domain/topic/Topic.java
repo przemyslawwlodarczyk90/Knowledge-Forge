@@ -19,7 +19,7 @@ public class Topic {
     /** Optimistic locking — zob. TopicDao#update / TopicDao#updateStatus. */
     private Integer version = 1;
     /**
-     * Mechanizm okresowej weryfikacji aktualności (zob. ACTUALITY_VERIFICATION.txt) —
+     * Mechanizm okresowej weryfikacji aktualności (zob. dokumentacja/ACTUALITY_VERIFICATION.txt) —
      * true = rekord uznany za aktualny; false = wymaga sprawdzenia. Nowy temat startuje jako
      * aktualny, bez daty potwierdzenia (rozliczany od createdAt, dopóki ktoś świadomie nie
      * potwierdzi/nie zapisze treści). Zmieniane WYŁĄCZNIE przez: POST .../verify-actuality,

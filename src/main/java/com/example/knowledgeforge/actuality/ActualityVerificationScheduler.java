@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 
 /**
  * Odpowiedzialny WYŁĄCZNIE za cykliczne uruchamianie {@link ActualityVerificationService#runVerificationSweep()}
- * zgodnie z harmonogramem cron z config.properties (zob. ACTUALITY_VERIFICATION.txt) — sama
+ * zgodnie z harmonogramem cron z config.properties (zob. dokumentacja/ACTUALITY_VERIFICATION.txt) — sama
  * reguła "kiedy temat traci aktualność" żyje w serwisie, nie tutaj. Wzorzec identyczny jak
  * {@code backup.DatabaseBackupService}: pojedynczy, dedykowany wątek-demon, `schedule(...)`
  * liczące czas do KOLEJNEGO uruchomienia na nowo za każdym razem (nie stały `scheduleAtFixedRate`)
