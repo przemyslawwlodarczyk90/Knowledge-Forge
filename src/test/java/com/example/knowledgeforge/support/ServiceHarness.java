@@ -1,5 +1,6 @@
 package com.example.knowledgeforge.support;
 
+import com.example.knowledgeforge.actuality.ActualityVerificationService;
 import com.example.knowledgeforge.config.AppConfig;
 import com.example.knowledgeforge.dao.AttachmentDao;
 import com.example.knowledgeforge.dao.CategoryDao;
@@ -42,8 +43,17 @@ public final class ServiceHarness implements AutoCloseable {
     public final TopicService topicService;
     public final NoteService noteService;
     public final ApplicationEventHub eventHub;
+    public final ActualityVerificationService actualityVerificationService;
+    /** Zegar wstrzyknięty do actualityVerificationService — testy przestawiają go przez
+     *  {@code clock.set(instant, zone)} zamiast czekać na prawdziwy upływ czasu (zob. MutableClock). */
+    public final MutableClock clock;
+    public final AppConfig config;
 
     public ServiceHarness(long userId, Path tempDir) {
+        this(userId, tempDir, new Properties());
+    }
+
+    public ServiceHarness(long userId, Path tempDir, Properties configOverrides) {
         this.dataSource = TestDatabase.create();
         this.userDao = new UserDao(dataSource);
         this.categoryDao = new CategoryDao(dataSource);
@@ -62,7 +72,7 @@ public final class ServiceHarness implements AutoCloseable {
         this.eventHub = new ApplicationEventHub(new WebSocketConnectionRegistry());
         this.attachmentLockRegistry = new AttachmentLockRegistry();
 
-        AppConfig config = AppConfig.fromProperties(new Properties());
+        this.config = AppConfig.fromProperties(configOverrides);
         AttachmentStorage attachmentStorage = new AttachmentStorage(tempDir.resolve("attachments"));
         this.attachmentService = new AttachmentService(
                 attachmentDao, attachmentStorage, topicDao, currentUser, config, attachmentLockRegistry, eventHub);
@@ -70,6 +80,9 @@ public final class ServiceHarness implements AutoCloseable {
         NoteFileStorage noteFileStorage = new NoteFileStorage(tempDir.resolve("notes"));
         this.noteService = new NoteService(
                 dataSource, noteDao, topicService, topicDao, categoryDao, currentUser, noteFileStorage, eventHub);
+        this.clock = MutableClock.systemUTC();
+        this.actualityVerificationService = new ActualityVerificationService(
+                dataSource, topicDao, config, currentUser, eventHub, clock);
     }
 
     @Override
@@ -84,10 +97,16 @@ public final class ServiceHarness implements AutoCloseable {
      * ServiceHarness (który sam otwiera swój docelowy pool).
      */
     public static ServiceHarness withFreshUser(Path tempDir, String usernamePrefix) throws Exception {
+        return withFreshUser(tempDir, usernamePrefix, new Properties());
+    }
+
+    /** Jak {@link #withFreshUser(Path, String)}, ale z niestandardowymi wartościami config.properties
+     *  (np. innym actuality.verification.period — zob. ActualityVerificationServiceTest). */
+    public static ServiceHarness withFreshUser(Path tempDir, String usernamePrefix, Properties configOverrides) throws Exception {
         long userId;
         try (HikariDataSource bootstrapDs = TestDatabase.create()) {
             userId = TestFixtures.insertUser(bootstrapDs, usernamePrefix + "-" + java.util.UUID.randomUUID());
         }
-        return new ServiceHarness(userId, tempDir);
+        return new ServiceHarness(userId, tempDir, configOverrides);
     }
 }

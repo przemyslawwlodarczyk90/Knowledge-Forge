@@ -33,6 +33,7 @@
         <hikari.version>5.1.0</hikari.version>
         <postgresql.version>42.7.4</postgresql.version>
         <junit.version>5.10.3</junit.version>
+        <cron-utils.version>9.2.1</cron-utils.version>
 
         <main.class>com.example.knowledgeforge.Main</main.class>
     </properties>
@@ -79,6 +80,16 @@
             <groupId>com.zaxxer</groupId>
             <artifactId>HikariCP</artifactId>
             <version>${hikari.version}</version>
+        </dependency>
+
+        <!-- CRON — parsowanie/walidacja wyrażeń cron i wyliczanie następnego uruchomienia
+             (ActualityVerificationScheduler). Mała, utrzymywana biblioteka zamiast własnego,
+             niepełnego parsera; jedyna transytywna zależność to slf4j-api (już de facto
+             standard, nic ciężkiego). -->
+        <dependency>
+            <groupId>com.cronutils</groupId>
+            <artifactId>cron-utils</artifactId>
+            <version>${cron-utils.version}</version>
         </dependency>
 
         <!-- TESTS -->

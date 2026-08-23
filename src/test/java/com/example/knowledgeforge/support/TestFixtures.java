@@ -43,20 +43,53 @@ public final class TestFixtures {
     }
 
     public static UUID insertTopic(DataSource ds, long userId, UUID categoryId, String title) throws Exception {
+        return insertTopic(ds, userId, categoryId, title, Instant.now(), null, true, null);
+    }
+
+    /**
+     * Wariant z pełną kontrolą nad polami istotnymi dla weryfikacji aktualności — używany przez
+     * ActualityVerificationService/SchedulerTest do przygotowania rekordów po obu stronach
+     * granicy okresu, z/bez wcześniejszej daty potwierdzenia, już oznaczonych jako nieaktualne itd.
+     */
+    public static UUID insertTopic(DataSource ds, long userId, UUID categoryId, String title, Instant createdAt,
+                                    Instant lastVerificationOfActualityDate, boolean actualityVerified, String author) throws Exception {
         UUID id = UUID.randomUUID();
-        String sql = "INSERT INTO topic (id, user_id, category_id, title, detail_level, type, status, created_at, updated_at) "
-                + "VALUES (?, ?, ?, ?, 'MEDIUM', 'NOTE', 'NEW', ?, ?)";
+        String sql = "INSERT INTO topic (id, user_id, category_id, title, author, detail_level, type, status, "
+                + "created_at, updated_at, actuality_verified, last_verification_of_actuality_date) "
+                + "VALUES (?, ?, ?, ?, ?, 'MEDIUM', 'NOTE', 'NEW', ?, ?, ?, ?)";
         try (Connection c = ds.getConnection(); PreparedStatement ps = c.prepareStatement(sql)) {
-            Timestamp now = Timestamp.from(Instant.now());
             ps.setObject(1, id);
             ps.setLong(2, userId);
             ps.setObject(3, categoryId);
             ps.setString(4, title);
-            ps.setTimestamp(5, now);
-            ps.setTimestamp(6, now);
+            ps.setString(5, author);
+            ps.setTimestamp(6, Timestamp.from(createdAt));
+            ps.setTimestamp(7, Timestamp.from(createdAt));
+            ps.setBoolean(8, actualityVerified);
+            ps.setTimestamp(9, lastVerificationOfActualityDate == null ? null : Timestamp.from(lastVerificationOfActualityDate));
             ps.executeUpdate();
         }
         return id;
+    }
+
+    public static Integer topicVersion(DataSource ds, UUID topicId) throws Exception {
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT version FROM topic WHERE id = ?")) {
+            ps.setObject(1, topicId);
+            try (var rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : null;
+            }
+        }
+    }
+
+    public static Boolean topicActualityVerified(DataSource ds, UUID topicId) throws Exception {
+        try (Connection c = ds.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT actuality_verified FROM topic WHERE id = ?")) {
+            ps.setObject(1, topicId);
+            try (var rs = ps.executeQuery()) {
+                return rs.next() ? rs.getBoolean(1) : null;
+            }
+        }
     }
 
     public static boolean topicExists(DataSource ds, UUID topicId) throws Exception {

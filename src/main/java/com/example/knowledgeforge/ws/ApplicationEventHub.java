@@ -91,6 +91,17 @@ public class ApplicationEventHub {
                 Map.of("attachmentId", attachmentId, "topicId", topicId));
     }
 
+    // ── Weryfikacja aktualności (zob. ACTUALITY_VERIFICATION.txt) ────────────────────────────
+    // Zmiany pojedynczego tematu (ręczne potwierdzenie, zapis notatki) rozgłaszamy przez
+    // ZWYKŁE topicUpdated (frontend już umie na to reagować — świeży `version` trafia do
+    // otwartych kart, zob. NotePanel). To zdarzenie jest CELOWO osobne i lżejsze — sygnalizuje
+    // WYŁĄCZNIE "coś w zbiorze tematów do weryfikacji się zmieniło", żeby otwarty panel
+    // "Weryfikacja aktualności" wiedział, że ma się odświeżyć, bez dociągania treści notatek.
+    public void actualityReviewChanged(int changedCount, java.util.List<UUID> topicIds) {
+        publish("ACTUALITY_REVIEW_CHANGED", null, null, null, null,
+                Map.of("changedCount", changedCount, "topicIds", topicIds));
+    }
+
     // ── Kategorie ─────────────────────────────────────────────────────
 
     public void categoryCreated(CategoryDto category, String actorId, String clientId) {

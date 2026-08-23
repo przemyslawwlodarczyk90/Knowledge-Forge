@@ -81,6 +81,24 @@ public final class Schema {
             "ALTER TABLE topic DROP CONSTRAINT IF EXISTS topic_status_check",
             "UPDATE topic SET status = 'NOTE_ADDED' WHERE status IN ('NOTE_GENERATED', 'QUIZ_READY', 'PASSED', 'MASTERED')",
 
+            // Weryfikacja aktualności (zob. ACTUALITY_VERIFICATION.txt) — DEFAULT TRUE oznacza, że
+            // WSZYSTKIE istniejące rekordy po migracji startują jako aktualne, z pustą datą
+            // potwierdzenia (termin liczy się wtedy od created_at — zob.
+            // ActualityVerificationService). Świadomie NIE ustawiamy im sztucznej daty "teraz" —
+            // to zniekształciłoby harmonogram (wszystkie stare rekordy przestałyby być aktualne
+            // dokładnie tego samego dnia, `okres` od dziś, zamiast rozłożenia w czasie wg
+            // faktycznej daty utworzenia).
+            "ALTER TABLE topic ADD COLUMN IF NOT EXISTS actuality_verified BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE topic ADD COLUMN IF NOT EXISTS last_verification_of_actuality_date TIMESTAMPTZ",
+            // Częściowy indeks — wspiera GET /api/topics/actuality-review (filtr user_id [+author]
+            // WHERE actuality_verified = FALSE); rekordów już aktualnych (zwykle większość) w ogóle
+            // nie indeksuje, więc jest mały i tani w utrzymaniu.
+            """
+            CREATE INDEX IF NOT EXISTS idx_topic_actuality_unverified
+            ON topic (user_id, author)
+            WHERE actuality_verified = FALSE
+            """,
+
             """
             CREATE TABLE IF NOT EXISTS note (
                 id UUID PRIMARY KEY,

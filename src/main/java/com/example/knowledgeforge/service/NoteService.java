@@ -13,6 +13,7 @@ import com.example.knowledgeforge.domain.note.dto.NoteDto;
 import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.domain.topic.TopicStatus;
+import com.example.knowledgeforge.domain.topic.dto.TopicDto;
 import com.example.knowledgeforge.storage.NoteFileStorage;
 import com.example.knowledgeforge.ws.ApplicationEventHub;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -123,15 +124,19 @@ public class NoteService {
 
         Note note;
         TopicStatus finalStatus;
+        Topic updatedTopic;
         // MULTI-THREADING:
         // Jedna transakcja JDBC obejmuje: (1) warunkowy UPDATE/INSERT notatki z optimistic
-        // lockingiem (WHERE version = ?) i (2) warunkową zmianę statusu tematu NEW -> NOTE_ADDED
-        // (też przez WHERE version = ?, na świeżo odczytanej w tej transakcji wersji tematu).
-        // Obie zmiany muszą zajść razem albo wcale — inaczej moglibyśmy zapisać notatkę, a status
-        // tematu zostawić NEW (albo odwrotnie), co jest złym stanem widocznym dla innych żądań.
-        // Zakres blokady/transakcji to WYŁĄCZNIE te dwa zapytania SQL — żadnego I/O na plikach ani
-        // komunikacji WebSocket wewnątrz. commit/rollback + zamknięcie połączenia są w finally,
-        // zanim cokolwiek zostanie rozgłoszone.
+        // lockingiem (WHERE version = ?) i (2) BEZWARUNKOWĄ (przy każdym udanym zapisie, nie
+        // tylko przy pierwszym) zmianę tematu — ewentualne przejście statusu NEW -> NOTE_ADDED
+        // ORAZ potwierdzenie aktualności (actualityVerified=true, lastVerificationOfActualityDate
+        // =teraz — zob. ACTUALITY_VERIFICATION.txt), jednym atomowym UPDATE-em bumpującym
+        // topic.version DOKŁADNIE RAZ (TopicDao#markNoteSaved), na świeżo odczytanej w tej
+        // transakcji wersji tematu. Obie zmiany (notatka + temat) muszą zajść razem albo wcale —
+        // inaczej moglibyśmy zapisać notatkę, a temat zostawić w złym/nieaktualnym stanie,
+        // widocznym dla innych żądań. Zakres blokady/transakcji to WYŁĄCZNIE te dwa zapytania
+        // SQL — żadnego I/O na plikach ani komunikacji WebSocket wewnątrz. commit/rollback +
+        // zamknięcie połączenia są w finally, zanim cokolwiek zostanie rozgłoszone.
         try (Connection con = dataSource.getConnection()) {
             con.setAutoCommit(false);
             try {
@@ -160,16 +165,18 @@ public class NoteService {
 
                 Topic freshTopic = topicDao.findByIdAndUserId(con, topicId, userId)
                         .orElseThrow(() -> new NotFoundException("Topic disappeared during note save: " + topicId));
-                if (freshTopic.getStatus() == TopicStatus.NEW) {
-                    int affected = topicDao.updateStatus(con, topicId, TopicStatus.NOTE_ADDED, freshTopic.getVersion());
-                    if (affected == 0) {
-                        con.rollback();
-                        throw new ConflictException("Topic was modified by someone else in the meantime");
-                    }
-                    finalStatus = TopicStatus.NOTE_ADDED;
-                } else {
-                    finalStatus = freshTopic.getStatus();
+                finalStatus = freshTopic.getStatus() == TopicStatus.NEW ? TopicStatus.NOTE_ADDED : freshTopic.getStatus();
+                Instant verifiedAt = Instant.now();
+                int affected = topicDao.markNoteSaved(con, topicId, finalStatus, freshTopic.getVersion(), verifiedAt);
+                if (affected == 0) {
+                    con.rollback();
+                    throw new ConflictException("Topic was modified by someone else in the meantime");
                 }
+                freshTopic.setStatus(finalStatus);
+                freshTopic.setActualityVerified(true);
+                freshTopic.setLastVerificationOfActualityDate(verifiedAt);
+                freshTopic.setVersion(freshTopic.getVersion() + 1);
+                updatedTopic = freshTopic;
 
                 con.commit();
             } catch (Exception e) {
@@ -183,6 +190,10 @@ public class NoteService {
         }
 
         eventHub.noteSaved(note.getId(), topicId, note.getVersion(), finalStatus, String.valueOf(userId), clientId);
+        // Temat mógł zmienić version (status i/lub potwierdzenie aktualności) — rozgłaszamy
+        // pełny, świeży TopicDto, żeby żadna otwarta karta (w tym panel "Weryfikacja aktualności")
+        // nie została ze starą wersją (zob. NotePanel#onTopicUpdated, który już to konsumuje).
+        eventHub.topicUpdated(TopicDto.from(updatedTopic), String.valueOf(userId), clientId);
 
         return toDto(note);
     }

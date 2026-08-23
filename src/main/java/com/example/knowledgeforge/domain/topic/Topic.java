@@ -18,6 +18,17 @@ public class Topic {
     private Instant updatedAt;
     /** Optimistic locking — zob. TopicDao#update / TopicDao#updateStatus. */
     private Integer version = 1;
+    /**
+     * Mechanizm okresowej weryfikacji aktualności (zob. ACTUALITY_VERIFICATION.txt) —
+     * true = rekord uznany za aktualny; false = wymaga sprawdzenia. Nowy temat startuje jako
+     * aktualny, bez daty potwierdzenia (rozliczany od createdAt, dopóki ktoś świadomie nie
+     * potwierdzi/nie zapisze treści). Zmieniane WYŁĄCZNIE przez: POST .../verify-actuality,
+     * udany zapis notatki (NoteService#save) i okresowy ActualityVerificationScheduler —
+     * NIGDY przez ogólny PATCH /api/topics/{id}.
+     */
+    private boolean actualityVerified = true;
+    /** Czas ostatniego ŚWIADOMEGO potwierdzenia/aktualizacji treści — null, dopóki nikt tego nie zrobił. */
+    private Instant lastVerificationOfActualityDate;
 
     public Topic() {
     }
@@ -57,4 +68,10 @@ public class Topic {
 
     public Integer getVersion() { return version; }
     public void setVersion(Integer version) { this.version = version; }
+
+    public boolean isActualityVerified() { return actualityVerified; }
+    public void setActualityVerified(boolean actualityVerified) { this.actualityVerified = actualityVerified; }
+
+    public Instant getLastVerificationOfActualityDate() { return lastVerificationOfActualityDate; }
+    public void setLastVerificationOfActualityDate(Instant lastVerificationOfActualityDate) { this.lastVerificationOfActualityDate = lastVerificationOfActualityDate; }
 }

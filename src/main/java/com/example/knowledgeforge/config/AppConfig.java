@@ -2,6 +2,8 @@ package com.example.knowledgeforge.config;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.time.Period;
+import java.time.ZoneId;
 import java.util.Locale;
 import java.util.Properties;
 
@@ -156,5 +158,49 @@ public class AppConfig {
      */
     public String backupRestoreSecret() {
         return get("backup.restore.secret", "");
+    }
+
+    // ===============================
+    // WERYFIKACJA AKTUALNOŚCI NOTATEK (zob. ACTUALITY_VERIFICATION.txt)
+    // ===============================
+
+    public boolean actualityVerificationEnabled() {
+        return Boolean.parseBoolean(get("actuality.verification.enabled", "true"));
+    }
+
+    /**
+     * Okres ważności jako java.time.Period (kalendarzowy — lata/miesiące/dni, nie sztywna liczba
+     * sekund), np. "P2Y" = 2 lata. Parsowane (i więc zwalidowane) przy KAŻDYM wywołaniu — celowo
+     * wołane raz, jawnie, zaraz po starcie (zob. Main / ActualityVerificationScheduler), żeby
+     * błędny format przerwał uruchomienie aplikacji jednoznacznym wyjątkiem, zamiast po cichu
+     * wyłączyć mechanizm dopiero przy pierwszej próbie użycia.
+     */
+    public Period actualityVerificationPeriod() {
+        String raw = get("actuality.verification.period", "P2Y");
+        try {
+            return Period.parse(raw);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new IllegalStateException(
+                    "Invalid actuality.verification.period '" + raw + "' — expected an ISO-8601 java.time.Period "
+                            + "expression, e.g. P2Y (2 years) or P6M (6 months)", e);
+        }
+    }
+
+    /** Surowy, pięciopolowy wyraz cron (minuta godzina dzień-miesiąca miesiąc dzień-tygodnia) — parsowany
+     *  i walidowany w ActualityVerificationScheduler (jedyne miejsce zależne od cron-utils). */
+    public String actualityVerificationCron() {
+        return get("actuality.verification.cron", "0 17 * * 5");
+    }
+
+    /** Strefa czasowa harmonogramu I samego okresu ważności — jawna, niezależna od strefy serwera/OS. */
+    public ZoneId actualityVerificationZoneId() {
+        String raw = get("actuality.verification.zone-id", "Europe/Warsaw");
+        try {
+            return ZoneId.of(raw);
+        } catch (java.time.DateTimeException e) {
+            throw new IllegalStateException(
+                    "Invalid actuality.verification.zone-id '" + raw + "' — expected a valid IANA zone id, "
+                            + "e.g. Europe/Warsaw", e);
+        }
     }
 }

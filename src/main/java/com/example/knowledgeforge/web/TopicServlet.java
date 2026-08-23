@@ -1,11 +1,13 @@
 package com.example.knowledgeforge.web;
 
+import com.example.knowledgeforge.actuality.ActualityVerificationService;
 import com.example.knowledgeforge.domain.exception.PayloadTooLargeException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
 import com.example.knowledgeforge.domain.topic.DetailLevel;
 import com.example.knowledgeforge.domain.topic.dto.CreateTopicRequest;
 import com.example.knowledgeforge.domain.topic.dto.UpdateTopicRequest;
+import com.example.knowledgeforge.domain.topic.dto.VerifyActualityRequest;
 import com.example.knowledgeforge.service.AttachmentService;
 import com.example.knowledgeforge.service.NoteService;
 import com.example.knowledgeforge.service.TopicService;
@@ -26,6 +28,10 @@ import java.util.UUID;
  * w przeglądarce, na żądanie — brak tu po niego endpointu.
  * GET /api/topics?author=&detailLevel=&categoryId= — filtr do panelu "Filtry".
  * GET /api/topics/authors — lista autorów do rozwijanego wyboru w filtrze.
+ * GET /api/topics/actuality-review[?author=] — tematy wymagające sprawdzenia aktualności
+ * (zob. ACTUALITY_VERIFICATION.txt). POST /api/topics/{id}/verify-actuality — ich ręczne
+ * potwierdzenie. Obie ścieżki sprawdzane PRZED ogólną obsługą /api/topics/{id}, żeby
+ * "actuality-review" nie trafiło do parseUuid(...).
  */
 public class TopicServlet extends ApiServlet {
 
@@ -40,11 +46,14 @@ public class TopicServlet extends ApiServlet {
     private final TopicService topicService;
     private final NoteService noteService;
     private final AttachmentService attachmentService;
+    private final ActualityVerificationService actualityVerificationService;
 
-    public TopicServlet(TopicService topicService, NoteService noteService, AttachmentService attachmentService) {
+    public TopicServlet(TopicService topicService, NoteService noteService, AttachmentService attachmentService,
+                         ActualityVerificationService actualityVerificationService) {
         this.topicService = topicService;
         this.noteService = noteService;
         this.attachmentService = attachmentService;
+        this.actualityVerificationService = actualityVerificationService;
     }
 
     @Override
@@ -58,6 +67,10 @@ public class TopicServlet extends ApiServlet {
             ));
         } else if (seg.length == 1 && "authors".equals(seg[0])) {
             writeJson(resp, 200, topicService.listAuthors());
+        } else if (seg.length == 1 && "actuality-review".equals(seg[0])) {
+            // Sprawdzane PRZED ogólnym "seg.length == 1 -> getById" niżej — inaczej "actuality-review"
+            // trafiłoby do parseUuid(...) i zwróciło 400 zamiast właściwej listy.
+            writeJson(resp, 200, actualityVerificationService.listForReview(blankToNull(req.getParameter("author"))));
         } else if (seg.length == 1) {
             writeJson(resp, 200, topicService.getById(parseUuid(seg[0])));
         } else if (seg.length == 2 && "note".equals(seg[1])) {
@@ -80,6 +93,10 @@ public class TopicServlet extends ApiServlet {
             writeJson(resp, 201, dto);
         } else if (seg.length == 2 && "attachments".equals(seg[1])) {
             handleUploadAttachment(parseUuid(seg[0]), req, resp);
+        } else if (seg.length == 2 && "verify-actuality".equals(seg[1])) {
+            var body = readJson(req, VerifyActualityRequest.class);
+            var dto = actualityVerificationService.confirmActuality(parseUuid(seg[0]), body.expectedVersion(), clientId(req));
+            writeJson(resp, 200, dto);
         } else {
             resp.sendError(HttpServletResponse.SC_NOT_FOUND);
         }

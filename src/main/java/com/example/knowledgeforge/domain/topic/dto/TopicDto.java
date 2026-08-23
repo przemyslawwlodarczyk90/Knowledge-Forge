@@ -23,6 +23,9 @@ public class TopicDto {
     private Instant updatedAt;
     /** Optimistic locking — frontend odsyła tę wartość jako expectedVersion przy kolejnym PATCH-u. */
     private Integer version;
+    /** Zob. Topic#actualityVerified / ACTUALITY_VERIFICATION.txt. Nazewnictwo Java/JSON celowo identyczne. */
+    private boolean actualityVerified;
+    private Instant lastVerificationOfActualityDate;
     /**
      * Wypełniane WYŁĄCZNIE w odpowiedzi na utworzenie tematu (POST /api/topics) — bezpośrednia
      * (bez podkategorii) liczba tematów w tej kategorii tuż po insercie, policzona w TEJ SAMEJ
@@ -37,7 +40,8 @@ public class TopicDto {
 
     public TopicDto(UUID id, Long userId, UUID categoryId, String title, String shortPrompt, String author,
                     DetailLevel detailLevel, TopicType type, TopicStatus status,
-                    Instant createdAt, Instant updatedAt, Integer version) {
+                    Instant createdAt, Instant updatedAt, Integer version,
+                    boolean actualityVerified, Instant lastVerificationOfActualityDate) {
         this.id = id;
         this.userId = userId;
         this.categoryId = categoryId;
@@ -50,12 +54,15 @@ public class TopicDto {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.version = version;
+        this.actualityVerified = actualityVerified;
+        this.lastVerificationOfActualityDate = lastVerificationOfActualityDate;
     }
 
     public static TopicDto from(Topic t) {
         return new TopicDto(
                 t.getId(), t.getUserId(), t.getCategoryId(), t.getTitle(), t.getShortPrompt(), t.getAuthor(),
-                t.getDetailLevel(), t.getType(), t.getStatus(), t.getCreatedAt(), t.getUpdatedAt(), t.getVersion()
+                t.getDetailLevel(), t.getType(), t.getStatus(), t.getCreatedAt(), t.getUpdatedAt(), t.getVersion(),
+                t.isActualityVerified(), t.getLastVerificationOfActualityDate()
         );
     }
 
@@ -94,6 +101,12 @@ public class TopicDto {
 
     public Integer getVersion() { return version; }
     public void setVersion(Integer version) { this.version = version; }
+
+    public boolean isActualityVerified() { return actualityVerified; }
+    public void setActualityVerified(boolean actualityVerified) { this.actualityVerified = actualityVerified; }
+
+    public Instant getLastVerificationOfActualityDate() { return lastVerificationOfActualityDate; }
+    public void setLastVerificationOfActualityDate(Instant lastVerificationOfActualityDate) { this.lastVerificationOfActualityDate = lastVerificationOfActualityDate; }
 
     public Integer getCategoryTopicCount() { return categoryTopicCount; }
     public void setCategoryTopicCount(Integer categoryTopicCount) { this.categoryTopicCount = categoryTopicCount; }

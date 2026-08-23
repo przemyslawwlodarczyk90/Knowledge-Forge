@@ -194,8 +194,9 @@ public class TopicDao {
         if (topic.getVersion() == null) topic.setVersion(1);
 
         String sql = """
-                INSERT INTO topic (id, user_id, category_id, title, short_prompt, author, detail_level, type, status, created_at, updated_at, version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO topic (id, user_id, category_id, title, short_prompt, author, detail_level, type, status,
+                                    created_at, updated_at, version, actuality_verified, last_verification_of_actuality_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         try (PreparedStatement ps = con.prepareStatement(sql)) {
             ps.setObject(1, topic.getId());
@@ -210,6 +211,11 @@ public class TopicDao {
             ps.setTimestamp(10, Timestamp.from(topic.getCreatedAt()));
             ps.setTimestamp(11, Timestamp.from(topic.getUpdatedAt()));
             ps.setInt(12, topic.getVersion());
+            // Nowo tworzony temat zawsze startuje jako aktualny, bez daty potwierdzenia — zob.
+            // Topic#actualityVerified (domyślne pole Javy = true) i ACTUALITY_VERIFICATION.txt.
+            ps.setBoolean(13, topic.isActualityVerified());
+            ps.setTimestamp(14, topic.getLastVerificationOfActualityDate() == null
+                    ? null : Timestamp.from(topic.getLastVerificationOfActualityDate()));
             ps.executeUpdate();
             log.fine(() -> "Inserted topic " + topic.getId());
             return topic;
@@ -306,6 +312,110 @@ public class TopicDao {
         topic.setCreatedAt(rs.getTimestamp("created_at").toInstant());
         topic.setUpdatedAt(rs.getTimestamp("updated_at").toInstant());
         topic.setVersion(rs.getInt("version"));
+        topic.setActualityVerified(rs.getBoolean("actuality_verified"));
+        Timestamp lastVerification = rs.getTimestamp("last_verification_of_actuality_date");
+        topic.setLastVerificationOfActualityDate(lastVerification == null ? null : lastVerification.toInstant());
         return topic;
+    }
+
+    // ── Weryfikacja aktualności (zob. ACTUALITY_VERIFICATION.txt) ──────────────────────────────
+
+    /**
+     * Ręczne potwierdzenie aktualności (POST .../verify-actuality) — WYŁĄCZNIE pola aktualności,
+     * status/treść tematu nietknięte. Optimistic locking jak w #update: WHERE version = ?,
+     * version rośnie atomowo w tym samym UPDATE. 0 zmienionych wierszy = konflikt wersji.
+     */
+    public int confirmActuality(Connection con, UUID topicId, int expectedVersion, Instant verifiedAt) {
+        String sql = """
+                UPDATE topic SET actuality_verified = TRUE, last_verification_of_actuality_date = ?, version = version + 1
+                WHERE id = ? AND version = ?
+                """;
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(verifiedAt));
+            ps.setObject(2, topicId);
+            ps.setInt(3, expectedVersion);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to confirm topic actuality", e);
+        }
+    }
+
+    /**
+     * Woła NoteService#save po udanym zapisie treści — jeden atomowy UPDATE łączący ewentualne
+     * przejście statusu NEW -> NOTE_ADDED (przekazany `status` to już wyliczona wartość docelowa,
+     * patrz wywołujący) Z potwierdzeniem aktualności, żeby udany zapis notatki bumpował
+     * topic.version DOKŁADNIE RAZ, nie dwa razy pod rząd. Optimistic locking jak wyżej.
+     */
+    public int markNoteSaved(Connection con, UUID topicId, TopicStatus status, int expectedVersion, Instant verifiedAt) {
+        String sql = """
+                UPDATE topic SET status = ?, actuality_verified = TRUE, last_verification_of_actuality_date = ?, version = version + 1
+                WHERE id = ? AND version = ?
+                """;
+        try (PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setString(1, status.name());
+            ps.setTimestamp(2, Timestamp.from(verifiedAt));
+            ps.setObject(3, topicId);
+            ps.setInt(4, expectedVersion);
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to mark topic as note-saved", e);
+        }
+    }
+
+    /**
+     * Scheduler (ActualityVerificationScheduler) — jeden zbiorczy, warunkowy UPDATE zamiast
+     * wczytywania wszystkich tematów do Javy i filtrowania w pamięci. `cutoff` jest już
+     * wyliczonym w Javie (kalendarzowo, zob. ActualityVerificationService) momentem w czasie —
+     * rekord traci aktualność, gdy jego data bazowa (ostatnia weryfikacja, a w jej braku
+     * createdAt) jest nie później niż `cutoff`. Aktualizuje WYŁĄCZNIE rekordy wciąż oznaczone
+     * jako aktualne (actuality_verified = TRUE) — już nieaktualne nigdy nie są dotykane
+     * ponownie. version rośnie atomowo w tym samym UPDATE — spójność optimistic lockingu z
+     * resztą aplikacji, zob. komentarz w Topic#actualityVerified. RETURNING zwraca pełne wiersze
+     * (bez dodatkowego SELECT-a) — potrzebne do rozgłoszenia zdarzeń WebSocket per temat.
+     */
+    public List<Topic> markStaleAsUnverified(Instant cutoff) {
+        String sql = """
+                UPDATE topic SET actuality_verified = FALSE, version = version + 1
+                WHERE actuality_verified = TRUE AND COALESCE(last_verification_of_actuality_date, created_at) <= ?
+                RETURNING *
+                """;
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(cutoff));
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Topic> result = new ArrayList<>();
+                while (rs.next()) result.add(map(rs));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to mark stale topics as unverified", e);
+        }
+    }
+
+    /**
+     * Lista tematów oczekujących na sprawdzenie (GET /api/topics/actuality-review) — wyłącznie
+     * actuality_verified = FALSE, opcjonalnie zawężone po autorze, posortowane od najstarszej
+     * daty bazowej (COALESCE(last_verification_of_actuality_date, created_at) ASC). Wspierane
+     * częściowym indeksem idx_topic_actuality_unverified (user_id, author) WHERE actuality_verified
+     * = FALSE — zob. Schema. Nie czyta .kfdoc — wyłącznie kolumny tabeli topic.
+     */
+    public List<Topic> findForActualityReview(Long userId, String author) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT * FROM topic WHERE user_id = ? AND actuality_verified = FALSE");
+        if (author != null) sql.append(" AND author = ?");
+        sql.append(" ORDER BY COALESCE(last_verification_of_actuality_date, created_at) ASC");
+
+        try (Connection con = dataSource.getConnection();
+             PreparedStatement ps = con.prepareStatement(sql.toString())) {
+            ps.setLong(1, userId);
+            if (author != null) ps.setString(2, author);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<Topic> result = new ArrayList<>();
+                while (rs.next()) result.add(map(rs));
+                return result;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to list topics for actuality review", e);
+        }
     }
 }

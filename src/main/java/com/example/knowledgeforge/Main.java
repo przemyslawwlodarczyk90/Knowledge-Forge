@@ -1,5 +1,7 @@
 package com.example.knowledgeforge;
 
+import com.example.knowledgeforge.actuality.ActualityVerificationScheduler;
+import com.example.knowledgeforge.actuality.ActualityVerificationService;
 import com.example.knowledgeforge.backup.DatabaseBackupService;
 import com.example.knowledgeforge.backup.DatabaseRestoreService;
 import com.example.knowledgeforge.backup.MaintenanceGate;
@@ -44,6 +46,7 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.websocket.server.config.JettyWebSocketServletContainerInitializer;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.EnumSet;
 import java.util.logging.ConsoleHandler;
@@ -103,6 +106,15 @@ public final class Main {
         // Diagnostyka spójności baza<->dysk — tylko raportuje do logów, nic nie usuwa.
         new AttachmentDiagnosticsService(attachmentDao, attachmentStorage).run();
 
+        // ── Weryfikacja aktualności notatek (zob. ACTUALITY_VERIFICATION.txt) ────────────────
+        // Scheduler waliduje okres/cron/strefę w KONSTRUKTORZE, bezwarunkowo — tworzony jest więc
+        // zawsze (nie tylko gdy enabled=true), żeby błędna konfiguracja zawsze przerywała start.
+        ActualityVerificationService actualityVerificationService = new ActualityVerificationService(
+                dataSource, topicDao, config, currentUser, eventHub, Clock.systemUTC());
+        ActualityVerificationScheduler actualityVerificationScheduler =
+                new ActualityVerificationScheduler(config, actualityVerificationService);
+        actualityVerificationScheduler.start();
+
         // ── Backup / restore ────────────────────────────────────
         MaintenanceGate maintenanceGate = new MaintenanceGate();
         // Konstruktor tworzy katalog backupów, jeśli nie istnieje — jeśli się nie da,
@@ -127,7 +139,8 @@ public final class Main {
         JettyWebSocketServletContainerInitializer.configure(ctx, null);
         ctx.addServlet(new ServletHolder(new KnowledgeForgeWebSocketServlet(wsRegistry)), "/ws/updates");
 
-        ServletHolder topicServletHolder = new ServletHolder(new TopicServlet(topicService, noteService, attachmentService));
+        ServletHolder topicServletHolder = new ServletHolder(
+                new TopicServlet(topicService, noteService, attachmentService, actualityVerificationService));
         long maxAttachmentBytes = config.attachmentsMaxFileSizeMb() * 1024L * 1024L;
         // fileSizeThreshold=0 -> Jetty od razu spilluje każdą część multipart na dysk zamiast
         // buforować duże pliki w pamięci; TopicServlet dalej kopiuje ją strumieniowo do
@@ -164,6 +177,7 @@ public final class Main {
             heartbeat.shutdown();
             eventHub.shutdown();
             backupService.shutdown();
+            actualityVerificationScheduler.shutdown();
             dataSource.close();
         }));
 
