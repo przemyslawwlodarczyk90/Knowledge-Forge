@@ -205,6 +205,21 @@ public class AppConfig {
     }
 
     // ===============================
+    // WIDOCZNOŚĆ ELEMENTÓW UI — przełączniki bez wpływu na samą logikę, tylko na to, czy dany
+    // element jest w ogóle pokazany w interfejsie
+    // ===============================
+
+    /**
+     * Widoczność przycisku "Wczytaj dane binarne" (panel ratunkowy .kfdoc/.kfbundle, zob.
+     * dokumentacja/BACKUP_STRATEGY.txt, poziom 4) w menu bocznym. Domyślnie true (widoczny) —
+     * ustaw na false, żeby ukryć przycisk bez wyłączania samego mechanizmu w kodzie. Odczytywane
+     * przez frontend przez GET /api/app-config (zob. web.AppConfigServlet) jako "visibleBinaryLoader".
+     */
+    public boolean visibleBinaryLoader() {
+        return Boolean.parseBoolean(get("ui.visible-binary-loader", "true"));
+    }
+
+    // ===============================
     // CODZIENNY ZBIORCZY BACKUP NOTATEK/INSTRUKCJI (.kfbundle) — zob. dokumentacja/BACKUP_STRATEGY.txt
     // ===============================
 

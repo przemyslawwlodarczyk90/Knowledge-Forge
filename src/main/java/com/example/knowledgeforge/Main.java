@@ -27,6 +27,7 @@ import com.example.knowledgeforge.service.TopicService;
 import com.example.knowledgeforge.storage.AttachmentStorage;
 import com.example.knowledgeforge.storage.NoteFileStorage;
 import com.example.knowledgeforge.web.AdminBackupServlet;
+import com.example.knowledgeforge.web.AppConfigServlet;
 import com.example.knowledgeforge.web.AttachmentServlet;
 import com.example.knowledgeforge.web.CategoryServlet;
 import com.example.knowledgeforge.web.CorsFilter;
@@ -162,6 +163,7 @@ public final class Main {
 
         ctx.addServlet(new ServletHolder(new CategoryServlet(categoryService, topicService)), "/api/categories/*");
         ctx.addServlet(new ServletHolder(new SearchServlet(searchService)), "/api/search");
+        ctx.addServlet(new ServletHolder(new AppConfigServlet(config)), "/api/app-config");
         ctx.addServlet(new ServletHolder(new AttachmentServlet(attachmentService)), "/api/attachments/*");
         // Sekretny endpoint admina — świadomie bez wpisu w żadnym menu/UI (zob. AdminBackupServlet).
         ctx.addServlet(new ServletHolder(new AdminBackupServlet(config, backupService, restoreService)), "/api/admin/backups/*");
