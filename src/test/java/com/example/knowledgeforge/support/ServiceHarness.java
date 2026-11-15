@@ -2,11 +2,11 @@ package com.example.knowledgeforge.support;
 
 import com.example.knowledgeforge.actuality.ActualityVerificationService;
 import com.example.knowledgeforge.config.AppConfig;
-import com.example.knowledgeforge.dao.AttachmentDao;
-import com.example.knowledgeforge.dao.CategoryDao;
-import com.example.knowledgeforge.dao.NoteDao;
-import com.example.knowledgeforge.dao.TopicDao;
-import com.example.knowledgeforge.dao.UserDao;
+import com.example.knowledgeforge.repository.AttachmentRepository;
+import com.example.knowledgeforge.repository.CategoryRepository;
+import com.example.knowledgeforge.repository.NoteRepository;
+import com.example.knowledgeforge.repository.TopicRepository;
+import org.springframework.transaction.PlatformTransactionManager;
 import com.example.knowledgeforge.service.AttachmentLockRegistry;
 import com.example.knowledgeforge.service.AttachmentService;
 import com.example.knowledgeforge.service.CurrentUser;
@@ -22,8 +22,8 @@ import java.nio.file.Path;
 import java.util.Properties;
 
 /**
- * Prawdziwe (nie-mockowane) drzewo serwisów do testów integracyjnych/współbieżności — ten sam
- * wire-up co Main.java, ale na osobnym schemacie testowym (zob. TestDatabase) i tymczasowych
+ * Prawdziwe (nie-mockowane) drzewo serwisów do testów integracyjnych/współbieżności — te same
+ * konstruktory co w kontenerze Springa (repozytoria z TestJpa), ale na osobnym schemacie testowym (zob. TestDatabase) i tymczasowych
  * katalogach na pliki notatek/załączników. ApplicationEventHub jest realny, lecz jego
  * WebSocketConnectionRegistry nigdy nie ma żadnej sesji dodanej — broadcast() jest wtedy
  * no-opem (pusty zbiór do rozesłania), więc testy serwisów swobodnie wołają metody publikujące
@@ -32,11 +32,10 @@ import java.util.Properties;
 public final class ServiceHarness implements AutoCloseable {
 
     public final HikariDataSource dataSource;
-    public final UserDao userDao;
-    public final CategoryDao categoryDao;
-    public final TopicDao topicDao;
-    public final NoteDao noteDao;
-    public final AttachmentDao attachmentDao;
+    public final CategoryRepository categoryRepository;
+    public final TopicRepository topicRepository;
+    public final NoteRepository noteRepository;
+    public final AttachmentRepository attachmentRepository;
     public final CurrentUser currentUser;
     public final AttachmentLockRegistry attachmentLockRegistry;
     public final AttachmentService attachmentService;
@@ -55,15 +54,14 @@ public final class ServiceHarness implements AutoCloseable {
 
     public ServiceHarness(long userId, Path tempDir, Properties configOverrides) {
         this.dataSource = TestDatabase.create();
-        this.userDao = new UserDao(dataSource);
-        this.categoryDao = new CategoryDao(dataSource);
-        this.topicDao = new TopicDao(dataSource);
-        this.noteDao = new NoteDao(dataSource);
-        this.attachmentDao = new AttachmentDao(dataSource);
-        // Podmienia CurrentUser#id() na stałą wartość bez logowania/sesji HTTP — zgodnie z tym,
-        // jak aplikacja i tak działa (jeden domyślny użytkownik), ale bez zależności od
-        // DefaultUserSeeder/config w testach.
-        this.currentUser = new CurrentUser(userDao, "unused") {
+        this.categoryRepository = TestJpa.get(CategoryRepository.class);
+        this.topicRepository = TestJpa.get(TopicRepository.class);
+        this.noteRepository = TestJpa.get(NoteRepository.class);
+        this.attachmentRepository = TestJpa.get(AttachmentRepository.class);
+        PlatformTransactionManager tx = TestJpa.transactionManager();
+        // Podmienia CurrentUser#id() na stałą wartość bez logowania/JWT — testy serwisów nie
+        // przechodzą przez Spring Security.
+        this.currentUser = new CurrentUser() {
             @Override
             public Long id() {
                 return userId;
@@ -75,14 +73,15 @@ public final class ServiceHarness implements AutoCloseable {
         this.config = AppConfig.fromProperties(configOverrides);
         AttachmentStorage attachmentStorage = new AttachmentStorage(tempDir.resolve("attachments"));
         this.attachmentService = new AttachmentService(
-                attachmentDao, attachmentStorage, topicDao, currentUser, config, attachmentLockRegistry, eventHub);
-        this.topicService = new TopicService(dataSource, topicDao, categoryDao, currentUser, attachmentService, eventHub);
+                attachmentRepository, attachmentStorage, topicRepository, currentUser, config, attachmentLockRegistry, eventHub);
+        this.topicService = new TopicService(tx, topicRepository, categoryRepository, noteRepository, currentUser,
+                attachmentService, eventHub);
         NoteFileStorage noteFileStorage = new NoteFileStorage(tempDir.resolve("notes"));
         this.noteService = new NoteService(
-                dataSource, noteDao, topicService, topicDao, categoryDao, currentUser, noteFileStorage, eventHub);
+                tx, noteRepository, topicService, topicRepository, categoryRepository, currentUser, noteFileStorage, eventHub);
         this.clock = MutableClock.systemUTC();
         this.actualityVerificationService = new ActualityVerificationService(
-                dataSource, topicDao, config, currentUser, eventHub, clock);
+                topicRepository, config, currentUser, eventHub, clock);
     }
 
     @Override

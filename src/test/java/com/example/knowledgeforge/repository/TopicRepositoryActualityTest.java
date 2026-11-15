@@ -1,10 +1,11 @@
-package com.example.knowledgeforge.dao;
+package com.example.knowledgeforge.repository;
 
 import com.example.knowledgeforge.domain.topic.DetailLevel;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.domain.topic.TopicStatus;
 import com.example.knowledgeforge.domain.topic.TopicType;
 import com.example.knowledgeforge.support.TestDatabase;
+import com.example.knowledgeforge.support.TestJpa;
 import com.example.knowledgeforge.support.TestFixtures;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterAll;
@@ -28,17 +29,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * DAO/mapowanie mechanizmu weryfikacji aktualności — zob. dokumentacja/ACTUALITY_VERIFICATION.txt. Integracyjny,
  * łączy się z osobną bazą testową kf_test (TestDatabase), nigdy z bazą roboczą.
  */
-class TopicDaoActualityTest {
+class TopicRepositoryActualityTest {
 
     static HikariDataSource ds;
-    static TopicDao dao;
+    static TopicRepository dao;
     static long userId;
     static UUID categoryId;
 
     @BeforeAll
     static void setUpAll() throws Exception {
         ds = TestDatabase.create();
-        dao = new TopicDao(ds);
+        dao = TestJpa.get(TopicRepository.class);
         userId = TestFixtures.insertUser(ds, "actuality-dao-" + UUID.randomUUID());
         categoryId = TestFixtures.insertCategory(ds, userId, "Actuality DAO test category");
     }
@@ -123,8 +124,8 @@ class TopicDaoActualityTest {
                 Instant.now().minus(400, ChronoUnit.DAYS), null, false, null);
         Instant verifiedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
-        try (Connection con = ds.getConnection()) {
-            int affected = dao.confirmActuality(con, id, 1, verifiedAt);
+        {
+            int affected = dao.confirmActuality(id, 1, verifiedAt);
             assertEquals(1, affected);
         }
 
@@ -138,8 +139,8 @@ class TopicDaoActualityTest {
     void confirmActuality_with_wrong_expectedVersion_affects_nothing() throws Exception {
         UUID id = TestFixtures.insertTopic(ds, userId, categoryId, "Version mismatch",
                 Instant.now(), null, false, null);
-        try (Connection con = ds.getConnection()) {
-            int affected = dao.confirmActuality(con, id, 99, Instant.now());
+        {
+            int affected = dao.confirmActuality(id, 99, Instant.now());
             assertEquals(0, affected, "mismatched version must affect 0 rows, never throw at the DAO level");
         }
         Topic reloaded = dao.findByIdAndUserId(id, userId).orElseThrow();
@@ -154,8 +155,8 @@ class TopicDaoActualityTest {
                 Instant.now().minus(999, ChronoUnit.DAYS), null, false, null);
         Instant verifiedAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
 
-        try (Connection con = ds.getConnection()) {
-            int affected = dao.markNoteSaved(con, id, TopicStatus.NOTE_ADDED, 1, verifiedAt);
+        {
+            int affected = dao.markNoteSaved(id, TopicStatus.NOTE_ADDED, 1, verifiedAt);
             assertEquals(1, affected);
         }
 

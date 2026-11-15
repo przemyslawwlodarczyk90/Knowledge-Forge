@@ -65,7 +65,7 @@ class NoteServiceActualityTest {
                 new CreateTopicRequest(categoryId, "First save", null, null, DetailLevel.MEDIUM, TopicType.NOTE), "c1");
         // Marks the topic as pre-existing/stale to prove the save actually FLIPS it, not just
         // leaves an already-true default untouched. Cutoff far in the future -> covers everything.
-        harness.topicDao.markStaleAsUnverified(Instant.now().plusSeconds(3600));
+        harness.topicRepository.markStaleAsUnverified(Instant.now().plusSeconds(3600));
         assertFalse(harness.topicService.getById(topic.getId()).isActualityVerified());
 
         NoteDto saved = harness.noteService.save(topic.getId(),
@@ -86,7 +86,7 @@ class NoteServiceActualityTest {
 
         // Force the topic back to "needs review" between the two saves, to prove the SECOND
         // (update) save re-confirms it too, not just the first.
-        harness.topicDao.markStaleAsUnverified(Instant.now().plusSeconds(3600));
+        harness.topicRepository.markStaleAsUnverified(Instant.now().plusSeconds(3600));
         assertFalse(harness.topicService.getById(topic.getId()).isActualityVerified());
 
         NoteDto updated = harness.noteService.save(topic.getId(),
@@ -105,7 +105,7 @@ class NoteServiceActualityTest {
         NoteDto first = harness.noteService.save(topic.getId(),
                 new SaveNoteRequest(simpleDoc("v1"), List.of(), null), "c1");
 
-        harness.topicDao.markStaleAsUnverified(Instant.now().plusSeconds(3600));
+        harness.topicRepository.markStaleAsUnverified(Instant.now().plusSeconds(3600));
         assertFalse(harness.topicService.getById(topic.getId()).isActualityVerified());
 
         // baseVersion voluntarily wrong -> 409, save must not go through.

@@ -25,9 +25,10 @@ import java.sql.Statement;
 public final class TestDatabase {
 
     private static final String BASE_URL = "jdbc:postgresql://localhost:5432/pgDB";
-    private static final String SCHEMA = "kf_test";
-    private static final String USER = "user";
-    private static final String PASSWORD = "password";
+    public static final String SCHEMA = "kf_test";
+    public static final String URL = BASE_URL + "?currentSchema=" + SCHEMA;
+    public static final String USER = "user";
+    public static final String PASSWORD = "password";
 
     private TestDatabase() {
     }
@@ -36,7 +37,7 @@ public final class TestDatabase {
         ensureSchemaExists();
 
         HikariConfig hc = new HikariConfig();
-        hc.setJdbcUrl(BASE_URL + "?currentSchema=" + SCHEMA);
+        hc.setJdbcUrl(URL);
         hc.setUsername(USER);
         hc.setPassword(PASSWORD);
         hc.setDriverClassName("org.postgresql.Driver");
@@ -49,7 +50,7 @@ public final class TestDatabase {
         return ds;
     }
 
-    private static void ensureSchemaExists() {
+    static void ensureSchemaExists() {
         try (Connection c = DriverManager.getConnection(BASE_URL, USER, PASSWORD);
              Statement st = c.createStatement()) {
             st.execute("CREATE SCHEMA IF NOT EXISTS " + SCHEMA);

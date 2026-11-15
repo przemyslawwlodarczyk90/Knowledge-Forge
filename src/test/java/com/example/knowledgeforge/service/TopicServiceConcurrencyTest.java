@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
-import java.sql.Connection;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -81,10 +80,8 @@ class TopicServiceConcurrencyTest {
 
         assertEquals(threads, results.size());
         // Wszystkie tematy naprawdę zapisane, żaden request się nie wywalił.
-        try (Connection con = harness.dataSource.getConnection()) {
-            int finalCount = harness.topicDao.countDirectByCategoryId(con, categoryId, userId);
-            assertEquals(threads, finalCount, "final DB count must reflect every concurrently created topic");
-        }
+        int finalCount = harness.topicRepository.countDirectByCategoryId(categoryId, userId);
+        assertEquals(threads, finalCount, "final DB count must reflect every concurrently created topic");
         // Każda odpowiedź niesie SWÓJ własny, poprawny (>=1) licznik zwrócony w tej samej transakcji
         // co insert — nie musi być globalnie unikalny/monotoniczny między wątkami (dwie transakcje
         // mogą nie widzieć się nawzajem pod READ COMMITTED), ale musi być w granicach [1, threads].

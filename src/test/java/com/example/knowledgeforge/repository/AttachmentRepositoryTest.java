@@ -1,8 +1,9 @@
-package com.example.knowledgeforge.dao;
+package com.example.knowledgeforge.repository;
 
 import com.example.knowledgeforge.domain.attachment.Attachment;
 import com.example.knowledgeforge.domain.attachment.AttachmentType;
 import com.example.knowledgeforge.support.TestDatabase;
+import com.example.knowledgeforge.support.TestJpa;
 import com.example.knowledgeforge.support.TestFixtures;
 import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.AfterAll;
@@ -19,14 +20,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /** Integracyjny — łączy się z osobną bazą testową kf_test (zob. TestDatabase), nigdy z bazą roboczą. */
-class AttachmentDaoTest {
+class AttachmentRepositoryTest {
 
     static HikariDataSource ds;
     static long userId;
     static UUID categoryId;
     static UUID topicId;
 
-    AttachmentDao dao;
+    AttachmentRepository dao;
 
     @BeforeAll
     static void setUpAll() throws Exception {
@@ -43,7 +44,7 @@ class AttachmentDaoTest {
 
     @BeforeEach
     void setUp() {
-        dao = new AttachmentDao(ds);
+        dao = TestJpa.get(AttachmentRepository.class);
     }
 
     @Test
