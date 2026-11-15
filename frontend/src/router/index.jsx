@@ -1,9 +1,9 @@
 import { lazy, Suspense } from 'react'
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { useAuthStore } from '@/store'
-import AppLayout    from '@/components/layout/AppLayout'
-import AuthLayout   from '@/components/layout/AuthLayout'
-import PageLoader   from '@/components/ui/PageLoader'
+import AppLayout  from '@/components/layout/AppLayout'
+import AuthLayout from '@/components/layout/AuthLayout'
+import PageLoader from '@/components/ui/PageLoader'
 
 // Auth
 const LoginPage    = lazy(() => import('@/pages/auth/LoginPage'))

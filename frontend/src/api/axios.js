@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getClientId } from '@/ws/clientId'
 
 const api = axios.create({
   baseURL: '/api',
@@ -6,8 +7,13 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Dołącz token JWT do każdego zapytania
+// Każde żądanie niesie clientId tej karty przeglądarki — backend wstawia go do zdarzenia
+// WebSocket jako sourceClientId, żeby karta, która sama wykonała operację, mogła rozpoznać
+// i zignorować (albo potraktować jako samo potwierdzenie) własne zdarzenie zwrotne.
 api.interceptors.request.use((config) => {
+  config.headers['X-Client-Id'] = getClientId()
+  // Token JWT (zob. useAuthStore) — wymagany przez backend dla każdej operacji modyfikującej.
+  // Zwykłe linki/obrazki/wideo (<img src="/api/...">) uwierzytelnia ciasteczko HttpOnly z logowania.
   const token = localStorage.getItem('jwt_token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -21,7 +27,8 @@ api.interceptors.response.use(
   (err) => {
     const status = err.response?.status
 
-    if (status === 401) {
+    // 401 poza samym logowaniem = token wygasł/nieważny -> wyloguj (zob. main.jsx)
+    if (status === 401 && !err.config?.url?.startsWith('/auth/login')) {
       window.dispatchEvent(new Event('auth:expired'))
     }
 

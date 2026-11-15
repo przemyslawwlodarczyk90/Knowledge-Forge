@@ -1,9 +1,3 @@
-// ╔══════════════════════════════════════════════════════════════╗
-// ║  ŚCIEŻKA:  src/pages/auth/LoginPage.jsx                    ║
-// ║  AKCJA:    NADPISZ                                         ║
-// ║  FIX:      userId z res.data (nie z JWT sub = email)       ║
-// ╚══════════════════════════════════════════════════════════════╝
-
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { authApi } from '@/api/services'
@@ -28,7 +22,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [showPw,  setShowPw]  = useState(false)
   const [mounted, setMounted] = useState(false)
-  const [debug,   setDebug]   = useState(null) // tymczasowe — do podglądu odpowiedzi
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -70,11 +63,6 @@ export default function LoginPage() {
         role:     data?.role     ?? 'USER',
       })
 
-      // Tymczasowy debug — usuń po weryfikacji
-      setDebug({ data, payload, resolvedUserId: userId })
-      console.log('[LOGIN] res.data:', data)
-      console.log('[LOGIN] JWT payload:', payload)
-      console.log('[LOGIN] resolved userId:', userId)
 
       navigate('/dashboard', { replace: true })
     } catch (err) {

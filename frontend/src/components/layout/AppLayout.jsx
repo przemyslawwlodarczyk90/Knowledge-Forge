@@ -1,6 +1,19 @@
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store'
+import { useResizablePanel } from '@/hooks'
+import { authApi, searchApi } from '@/api/services'
+import { openApplicationSocket, closeApplicationSocket } from '@/ws/socket'
 import ToastContainer from '@/components/ui/ToastContainer'
+import FiltersPanel from '@/components/knowledge/FiltersPanel'
+import ActualityReviewPanel from '@/components/knowledge/ActualityReviewPanel'
+import EmergencyRecoveryPanel from '@/components/knowledge/EmergencyRecoveryPanel'
+import ResizeHandle from './ResizeHandle'
+
+const SIDEBAR_DEFAULT = 240
+const SIDEBAR_MIN = 180
+const SIDEBAR_MAX = 420
+const SIDEBAR_COLLAPSED = 60
 
 /* ── Ikony SVG ── */
 const IconDashboard = () => (
@@ -34,24 +47,124 @@ const IconChevronRight = () => (
     <path d="M5.5 3L9 7l-3.5 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
   </svg>
 )
+const IconSearch = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+    <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
+    <path d="M9.5 9.5L13 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+  </svg>
+)
 
-const NAV = [{ to: '/dashboard', label: 'Dashboard', Icon: IconDashboard }]
+const NAV = [{ to: '/dashboard', label: 'Drzewo wiedzy', Icon: IconDashboard }]
 const ADMIN_NAV = [{ to: '/admin', label: 'Admin', Icon: IconAdmin }]
-const PAGE_LABELS = { '/dashboard': 'Dashboard', '/admin': 'Panel admina' }
+const PAGE_LABELS = { '/dashboard': 'Drzewo wiedzy', '/admin': 'Panel admina' }
+
+const MATCH_LABEL = { TITLE: 'tytuł', DESCRIPTION: 'opis', CONTENT: 'treść' }
+
+/* ── Klocek wyszukiwarki — przeszukuje tytuł, opis i treść wszystkich wpisów ── */
+function SearchBlock() {
+  const [query, setQuery]     = useState('')
+  const [results, setResults] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [open, setOpen]       = useState(false)
+  const debounceRef = useRef(null)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    clearTimeout(debounceRef.current)
+    const q = query.trim()
+    if (!q) { setResults(null); setOpen(false); return }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true)
+      try {
+        const res = await searchApi.search(q)
+        setResults(res.data)
+        setOpen(true)
+      } catch {
+        setResults([])
+        setOpen(true)
+      } finally {
+        setLoading(false)
+      }
+    }, 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [query])
+
+  const handlePick = useCallback((r) => {
+    navigate(`/dashboard?topic=${r.topicId}`)
+    setOpen(false)
+    setQuery('')
+    setResults(null)
+  }, [navigate])
+
+  return (
+    <div className="sb-search" onBlur={() => setTimeout(() => setOpen(false), 150)}>
+      <div className="sb-search-label">Wyszukiwarka</div>
+      <div className="sb-search-input-wrap">
+        <span className="sb-search-icon"><IconSearch /></span>
+        <input
+          className="sb-search-input"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onFocus={() => results && setOpen(true)}
+          placeholder="Szukaj w notatkach…"
+        />
+      </div>
+
+      {open && (
+        <div className="sb-search-results">
+          {loading && <div className="sb-search-status">Szukam…</div>}
+          {!loading && results?.length === 0 && <div className="sb-search-status">Brak wyników</div>}
+          {!loading && results?.map(r => (
+            <button key={r.topicId} className="sb-search-result" onMouseDown={() => handlePick(r)}>
+              <span className="sb-sr-title">{r.title}</span>
+              {r.snippet && (
+                <span className="sb-sr-snippet">
+                  <em>{MATCH_LABEL[r.matchedIn] ?? r.matchedIn}:</em> {r.snippet}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function AppLayout() {
-  const { user, logout }               = useAuthStore()
   const { sidebarOpen, toggleSidebar } = useUIStore()
+  const { user, logout } = useAuthStore()
   const navigate  = useNavigate()
-  const location  = useLocation()
   const isAdmin   = user?.role === 'ADMIN'
-  const pageLabel = PAGE_LABELS[location.pathname] ?? 'Knowledge-Forge'
+  const location  = useLocation()
 
-  const handleLogout = () => { logout(); navigate('/login') }
+  // Czyści też ciasteczko KF_TOKEN po stronie serwera (obrazki/wideo/WebSocket).
+  const handleLogout = () => {
+    authApi.logout().catch(() => {})
+    logout()
+    navigate('/login')
+  }
+  const pageLabel = PAGE_LABELS[location.pathname] ?? 'Knowledge Forge 2.0'
+
+  // Jedno współdzielone połączenie WebSocket dla całej aplikacji — otwarte raz, gdy layout
+  // (czyli cała appka — to jedyny stały korzeń tras) się montuje, zamykane przy odmontowaniu.
+  useEffect(() => {
+    openApplicationSocket()
+    return () => closeApplicationSocket()
+  }, [])
+
+  const sidebarResize = useResizablePanel({
+    defaultSize: SIDEBAR_DEFAULT,
+    min: SIDEBAR_MIN,
+    max: SIDEBAR_MAX,
+  })
+  const sidebarWidth = sidebarOpen ? sidebarResize.size : SIDEBAR_COLLAPSED
 
   return (
     <>
-      <div className={`shell ${sidebarOpen ? 'sb-open' : 'sb-closed'}`}>
+      <div
+        className={`shell ${sidebarOpen ? 'sb-open' : 'sb-closed'}`}
+        style={{ '--sb': `${sidebarWidth}px` }}
+      >
 
         {/* ── Sidebar ── */}
         <aside className="sidebar">
@@ -67,7 +180,7 @@ export default function AppLayout() {
               {sidebarOpen && (
                 <div className="sb-wordmark">
                   <span className="sb-wm-a">Knowledge</span>
-                  <span className="sb-wm-b">Forge</span>
+                  <span className="sb-wm-b">Forge 2.0</span>
                 </div>
               )}
             </div>
@@ -87,6 +200,11 @@ export default function AppLayout() {
                 {sidebarOpen && <span className="ni-label">{label}</span>}
               </NavLink>
             ))}
+
+            {sidebarOpen && <SearchBlock />}
+            {sidebarOpen && <FiltersPanel />}
+            {sidebarOpen && <ActualityReviewPanel />}
+            {sidebarOpen && <EmergencyRecoveryPanel />}
 
             {isAdmin && (
               <>
@@ -119,6 +237,17 @@ export default function AppLayout() {
           </div>
         </aside>
 
+        {/* Separator sidebar ↔ treść (tylko gdy sidebar jest rozwinięty) */}
+        {sidebarOpen && (
+          <ResizeHandle
+            className="sidebar-resize-handle"
+            label="Szerokość paska bocznego"
+            dragging={sidebarResize.dragging}
+            onPointerDown={sidebarResize.handlePointerDown}
+            onDoubleClick={sidebarResize.reset}
+          />
+        )}
+
         {/* ── Prawa strona ── */}
         <div className="content-wrap">
 
@@ -133,7 +262,7 @@ export default function AppLayout() {
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{marginRight:4}}>
                   <path d="M1.5 2.5h9M1.5 5.5h6M1.5 8.5h7.5M1.5 11.5h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                 </svg>
-                Knowledge-Forge
+                Knowledge Forge 2.0
               </span>
             </div>
           </header>
@@ -151,6 +280,32 @@ export default function AppLayout() {
         /* ── Shell ── */
         .shell { display:flex; min-height:100vh; --sb:240px; background:var(--bg-0); }
         .shell.sb-closed { --sb:60px; }
+
+        /* ── Admin nav + użytkownik (przywrócone z wersji z logowaniem) ── */
+        .sb-nav-label--gap { padding-top:20px; }
+        .ni--admin    { color:var(--cyan); }
+        .ni--admin:hover { background:var(--cyan-light); color:var(--cyan-dim); }
+        .ni--admin.ni--on { color:var(--cyan-dim) !important; background:var(--cyan-light) !important; }
+        .sb-user {
+          display:flex; align-items:center; gap:10px;
+          padding:12px 14px; border-top:1px solid var(--border-1); flex-shrink:0;
+        }
+        .sb-uavatar {
+          width:30px; height:30px; border-radius:8px; flex-shrink:0;
+          background:var(--accent-light); border:1px solid var(--border-0);
+          color:var(--accent); font-family:var(--font-mono); font-size:0.72rem; font-weight:700;
+          display:flex; align-items:center; justify-content:center;
+        }
+        .sb-utext { flex:1; overflow:hidden; }
+        .sb-uname { display:block; font-size:0.8rem; font-weight:600; color:var(--text-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .sb-urole { display:block; font-size:0.62rem; color:var(--text-3); margin-top:1px; font-family:var(--font-mono); letter-spacing:0.04em; }
+        .sb-logout-btn {
+          flex-shrink:0; background:none; border:none; color:var(--text-3);
+          cursor:pointer; padding:5px; border-radius:6px;
+          display:flex; align-items:center;
+          transition:color var(--t-fast), background var(--t-fast);
+        }
+        .sb-logout-btn:hover { color:var(--red); background:var(--red-light); }
 
         /* ── Sidebar ── */
         .sidebar {
@@ -190,6 +345,13 @@ export default function AppLayout() {
         }
         .sb-toggle-btn:hover { color:var(--accent); background:var(--accent-light); }
 
+        /* Separator sidebar ↔ treść — pozycja liczona z tej samej zmiennej --sb,
+           więc podąża za szerokością sidebaru bez dodatkowej logiki w JS. */
+        .sidebar-resize-handle {
+          position: fixed; top: 0; bottom: 0; margin: 0;
+          left: calc(var(--sb) - 4px);
+        }
+
         /* Nav */
         .sb-nav { flex:1; padding:8px; overflow-y:auto; overflow-x:hidden; }
         .sb-nav-label {
@@ -197,7 +359,6 @@ export default function AppLayout() {
           letter-spacing:0.12em; text-transform:uppercase;
           color:var(--text-3); padding:10px 8px 4px; white-space:nowrap;
         }
-        .sb-nav-label--gap { padding-top:20px; }
 
         .ni {
           display:flex; align-items:center; gap:9px;
@@ -211,33 +372,46 @@ export default function AppLayout() {
         .ni:hover     { color:var(--text-0); background:var(--bg-2); }
         .ni--on       { color:var(--accent) !important; background:var(--accent-light) !important; font-weight:600; }
         .ni--on .ni-icon { color:var(--accent); }
-        .ni--admin    { color:var(--cyan); }
-        .ni--admin:hover { background:var(--cyan-light); color:var(--cyan-dim); }
-        .ni--admin.ni--on { color:var(--cyan-dim) !important; background:var(--cyan-light) !important; }
         .ni-icon { flex-shrink:0; width:18px; display:flex; align-items:center; justify-content:center; }
         .ni-label { overflow:hidden; text-overflow:ellipsis; }
 
-        /* User footer */
-        .sb-user {
-          display:flex; align-items:center; gap:10px;
-          padding:12px 14px; border-top:1px solid var(--border-1); flex-shrink:0;
+        /* ── Klocek wyszukiwarki ── */
+        .sb-search { margin-top:18px; position:relative; }
+        .sb-search-label {
+          font-family:var(--font-mono); font-size:0.59rem; font-weight:700;
+          letter-spacing:0.12em; text-transform:uppercase;
+          color:var(--text-3); padding:2px 8px 6px; white-space:nowrap;
         }
-        .sb-uavatar {
-          width:30px; height:30px; border-radius:8px; flex-shrink:0;
-          background:var(--accent-light); border:1px solid var(--border-0);
-          color:var(--accent); font-family:var(--font-mono); font-size:0.72rem; font-weight:700;
-          display:flex; align-items:center; justify-content:center;
+        .sb-search-input-wrap {
+          display:flex; align-items:center; gap:6px;
+          padding:7px 9px; margin:0 2px;
+          border:1.5px solid var(--border-1); border-radius:var(--radius-md);
+          background:var(--bg-2); transition:border-color var(--t-fast), background var(--t-fast);
         }
-        .sb-utext { flex:1; overflow:hidden; }
-        .sb-uname { display:block; font-size:0.8rem; font-weight:600; color:var(--text-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .sb-urole { display:block; font-size:0.62rem; color:var(--text-3); margin-top:1px; font-family:var(--font-mono); letter-spacing:0.04em; }
-        .sb-logout-btn {
-          flex-shrink:0; background:none; border:none; color:var(--text-3);
-          cursor:pointer; padding:5px; border-radius:6px;
-          display:flex; align-items:center;
-          transition:color var(--t-fast), background var(--t-fast);
+        .sb-search-input-wrap:focus-within { border-color:var(--accent); background:#fff; }
+        .sb-search-icon { color:var(--text-3); flex-shrink:0; display:flex; }
+        .sb-search-input {
+          border:none; background:none; outline:none; flex:1; min-width:0;
+          font-size:0.78rem; color:var(--text-0);
         }
-        .sb-logout-btn:hover { color:var(--red); background:var(--red-light); }
+        .sb-search-input::placeholder { color:var(--text-3); }
+
+        .sb-search-results {
+          position:absolute; top:100%; left:2px; right:-2px; margin-top:4px;
+          background:#fff; border:1px solid var(--border-1); border-radius:var(--radius-md);
+          box-shadow:var(--shadow-lg); max-height:360px; overflow-y:auto; z-index:150;
+        }
+        .sb-search-status { padding:12px 12px; font-size:0.76rem; color:var(--text-3); }
+        .sb-search-result {
+          display:flex; flex-direction:column; gap:2px; width:100%;
+          padding:9px 12px; background:none; border:none; border-bottom:1px solid var(--border-2);
+          text-align:left; cursor:pointer; transition:background var(--t-fast);
+        }
+        .sb-search-result:last-child { border-bottom:none; }
+        .sb-search-result:hover { background:var(--bg-2); }
+        .sb-sr-title { font-size:0.8rem; font-weight:700; color:var(--text-0); }
+        .sb-sr-snippet { font-size:0.71rem; color:var(--text-2); line-height:1.4; }
+        .sb-sr-snippet em { font-style:normal; color:var(--accent); font-weight:600; }
 
         /* ── Right side ── */
         .content-wrap {
@@ -262,7 +436,7 @@ export default function AppLayout() {
           background:linear-gradient(180deg, var(--accent), var(--cyan));
         }
         .topbar-title  { font-size:0.95rem; font-weight:700; color:var(--text-0); }
-        .topbar-right  {}
+        .topbar-right  { display:flex; align-items:center; gap:12px; }
         .topbar-chip {
           display:inline-flex; align-items:center;
           font-family:var(--font-mono); font-size:0.66rem; font-weight:600;
@@ -276,7 +450,10 @@ export default function AppLayout() {
 
         /* ── Responsywność ── */
         @media (max-width: 900px) {
-          .shell { --sb: 60px; }
+          /* !important — na wąskim ekranie sidebar ma być zawsze zwinięty,
+             niezależnie od zapamiętanej/przeciąganej szerokości (inline style --sb). */
+          .shell { --sb: 60px !important; }
+          .sidebar-resize-handle { display: none; }
           .topbar { padding:0 16px; }
           .topbar-chip { display:none; }
           .main-content { padding:16px; }
