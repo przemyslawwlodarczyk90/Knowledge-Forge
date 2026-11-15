@@ -35,6 +35,11 @@ public class WebSocketHeartbeat {
         log.info(() -> "WebSocket heartbeat started (every " + seconds + "s)");
     }
 
+    /** Interwał jak przed migracją (Main: heartbeat.start(Duration.ofSeconds(25))). */
+    public void startDefault() {
+        start(Duration.ofSeconds(25));
+    }
+
     public void shutdown() {
         if (scheduler == null) return;
         scheduler.shutdownNow();
