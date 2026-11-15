@@ -24,3 +24,4 @@ dependency-reduced-pom.xml
 
 ### Dane użytkownika — pliki notatek na dysku (zob. notes.storage.path) ###
 /data/
+frontend/coverage/

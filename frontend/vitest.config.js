@@ -20,5 +20,13 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.js'],
     globals: false,
     css: false,
+    // Pokrycie: npm run test:coverage — raport w coverage/, próg 70% linii (poniżej przebieg się nie udaje).
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{js,jsx}'],
+      exclude: ['src/test/**', 'src/main.jsx'],
+      reporter: ['text-summary', 'html', 'json-summary'],
+      thresholds: { lines: 70 },
+    },
   },
 })
