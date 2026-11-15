@@ -1,24 +1,24 @@
 package com.example.knowledgeforge.actuality;
 
 import com.example.knowledgeforge.config.AppConfig;
-import com.example.knowledgeforge.dao.TopicDao;
 import com.example.knowledgeforge.domain.exception.ConflictException;
 import com.example.knowledgeforge.domain.exception.TopicNotFoundException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.domain.topic.dto.TopicDto;
 import com.example.knowledgeforge.service.CurrentUser;
+import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.ws.ApplicationEventHub;
+import org.springframework.stereotype.Service;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.Period;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.UUID;
 import java.util.logging.Logger;
@@ -37,21 +37,20 @@ import java.util.stream.Collectors;
  * odjęcie okresu od "teraz" w skonfigurowanej strefie czasowej, więc poprawnie uwzględnia lata
  * przestępne i różne długości miesięcy.
  */
+@Service
 public class ActualityVerificationService {
 
     private static final Logger log = Logger.getLogger(ActualityVerificationService.class.getName());
 
-    private final DataSource dataSource;
-    private final TopicDao topicDao;
+    private final TopicRepository topicRepository;
     private final AppConfig config;
     private final CurrentUser currentUser;
     private final ApplicationEventHub eventHub;
     private final Clock clock;
 
-    public ActualityVerificationService(DataSource dataSource, TopicDao topicDao, AppConfig config,
+    public ActualityVerificationService(TopicRepository topicRepository, AppConfig config,
                                          CurrentUser currentUser, ApplicationEventHub eventHub, Clock clock) {
-        this.dataSource = dataSource;
-        this.topicDao = topicDao;
+        this.topicRepository = topicRepository;
         this.config = config;
         this.currentUser = currentUser;
         this.eventHub = eventHub;
@@ -66,7 +65,7 @@ public class ActualityVerificationService {
     public List<TopicDto> listForReview(String author) {
         Long userId = currentUser.id();
         String normalizedAuthor = (author == null || author.isBlank()) ? null : author;
-        return topicDao.findForActualityReview(userId, normalizedAuthor).stream()
+        return topicRepository.findForActualityReview(userId, normalizedAuthor).stream()
                 .map(TopicDto::from)
                 .collect(Collectors.toList());
     }
@@ -82,16 +81,11 @@ public class ActualityVerificationService {
             throw new ValidationException("expectedVersion must not be null");
         }
         Long userId = currentUser.id();
-        Topic topic = topicDao.findByIdAndUserId(topicId, userId)
+        Topic topic = topicRepository.findByIdAndUserId(topicId, userId)
                 .orElseThrow(() -> new TopicNotFoundException(topicId.toString()));
 
         Instant verifiedAt = clock.instant();
-        int affected;
-        try (Connection con = dataSource.getConnection()) {
-            affected = topicDao.confirmActuality(con, topicId, expectedVersion, verifiedAt);
-        } catch (SQLException e) {
-            throw new RuntimeException("Failed to open connection for actuality confirmation", e);
-        }
+        int affected = topicRepository.confirmActuality(topicId, expectedVersion, verifiedAt);
         if (affected == 0) {
             log.warning(() -> "Actuality confirmation conflict for topic " + topicId
                     + " (expectedVersion=" + expectedVersion + ")");
@@ -104,8 +98,8 @@ public class ActualityVerificationService {
         log.info(() -> "Actuality confirmed for topic " + topicId + " -> version=" + topic.getVersion());
 
         TopicDto dto = TopicDto.from(topic);
-        eventHub.topicUpdated(dto, String.valueOf(userId), clientId);
-        eventHub.actualityReviewChanged(1, List.of(topicId));
+        eventHub.topicUpdated(userId, dto, String.valueOf(userId), clientId);
+        eventHub.actualityReviewChanged(userId, 1, List.of(topicId));
         return dto;
     }
 
@@ -113,7 +107,7 @@ public class ActualityVerificationService {
      * Woła ActualityVerificationScheduler raz na uruchomienie crona (i bezpośrednio testy
      * jednostkowe — sama logika nie zależy od crona). Zwraca liczbę tematów faktycznie
      * oznaczonych jako nieaktualne w tym przebiegu. Nie czyta treści .kfdoc — cała operacja to
-     * jeden zbiorczy UPDATE w TopicDao#markStaleAsUnverified.
+     * jeden zbiorczy UPDATE w TopicRepository#markStaleAsUnverified.
      */
     public int runVerificationSweep() {
         Period period = config.actualityVerificationPeriod();
@@ -122,18 +116,18 @@ public class ActualityVerificationService {
         Instant cutoff = ZonedDateTime.ofInstant(now, zone).minus(period).toInstant();
         log.fine(() -> "Actuality sweep: period=" + period + " zone=" + zone + " cutoff=" + cutoff);
 
-        List<Topic> changed = topicDao.markStaleAsUnverified(cutoff);
-        if (!changed.isEmpty()) {
-            List<UUID> ids = new ArrayList<>(changed.size());
-            for (Topic t : changed) {
-                ids.add(t.getId());
-                // Aktor systemowy — nie kojarzony z żadną konkretną kartą/użytkownikiem, więc
-                // WSZYSTKIE otwarte karty (łącznie z tą, która akurat patrzy na ten temat)
-                // poprawnie zastosują świeży `version`, zamiast zignorować zdarzenie jako "własne".
-                eventHub.topicUpdated(TopicDto.from(t), null, null);
-            }
-            eventHub.actualityReviewChanged(changed.size(), ids);
+        List<Topic> changed = topicRepository.markStaleAsUnverified(cutoff);
+        // Sweep obejmuje tematy WSZYSTKICH użytkowników naraz — zdarzenia grupujemy per właściciel,
+        // żeby każdy dostał wyłącznie informacje o swoich tematach.
+        Map<Long, List<UUID>> idsByOwner = new LinkedHashMap<>();
+        for (Topic t : changed) {
+            idsByOwner.computeIfAbsent(t.getUserId(), k -> new ArrayList<>()).add(t.getId());
+            // Aktor systemowy — nie kojarzony z żadną konkretną kartą, więc WSZYSTKIE otwarte karty
+            // właściciela (łącznie z tą, która akurat patrzy na ten temat) poprawnie zastosują świeży
+            // `version`, zamiast zignorować zdarzenie jako "własne".
+            eventHub.topicUpdated(t.getUserId(), TopicDto.from(t), null, null);
         }
+        idsByOwner.forEach((ownerId, ids) -> eventHub.actualityReviewChanged(ownerId, ids.size(), ids));
         return changed.size();
     }
 }

@@ -1,7 +1,10 @@
 package com.example.knowledgeforge.service;
 
-import com.example.knowledgeforge.dao.AttachmentDao;
+import com.example.knowledgeforge.repository.AttachmentRepository;
 import com.example.knowledgeforge.storage.AttachmentStorage;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,22 +18,23 @@ import java.util.stream.Stream;
 
 /**
  * Diagnostyka spójności baza <-> dysk dla załączników. WYŁĄCZNIE raportuje — nigdy nie
- * usuwa rekordów ani plików. Uruchamiana raz przy starcie (Main.java, tylko log) i dostępna
+ * usuwa rekordów ani plików. Uruchamiana raz przy starcie (ApplicationReadyEvent, tylko log) i dostępna
  * do ręcznego wywołania (np. z testu albo narzędzia administracyjnego).
  *
  * Po przywróceniu starszego backupu bazy mogą się pojawić pliki na dysku, których rekordów
  * już nie ma w przywróconej bazie (backup NIE obejmuje attachments.storage.path) — to
  * oczekiwane i opisane w dokumentacja/BACKUP_AND_RESTORE.txt, nie błąd tej diagnostyki.
  */
+@Service
 public class AttachmentDiagnosticsService {
 
     private static final Logger log = Logger.getLogger(AttachmentDiagnosticsService.class.getName());
 
-    private final AttachmentDao attachmentDao;
+    private final AttachmentRepository attachmentRepository;
     private final AttachmentStorage storage;
 
-    public AttachmentDiagnosticsService(AttachmentDao attachmentDao, AttachmentStorage storage) {
-        this.attachmentDao = attachmentDao;
+    public AttachmentDiagnosticsService(AttachmentRepository attachmentRepository, AttachmentStorage storage) {
+        this.attachmentRepository = attachmentRepository;
         this.storage = storage;
     }
 
@@ -40,8 +44,13 @@ public class AttachmentDiagnosticsService {
         }
     }
 
+    @EventListener(ApplicationReadyEvent.class)
+    public void runAtStartup() {
+        run();
+    }
+
     public Report run() {
-        List<String> dbPaths = attachmentDao.findAllRelativePaths();
+        List<String> dbPaths = attachmentRepository.findAllRelativePaths();
 
         List<String> missing = new ArrayList<>();
         for (String relativePath : dbPaths) {

@@ -1,8 +1,6 @@
 package com.example.knowledgeforge.service;
 
 import com.example.knowledgeforge.config.AppConfig;
-import com.example.knowledgeforge.dao.AttachmentDao;
-import com.example.knowledgeforge.dao.TopicDao;
 import com.example.knowledgeforge.domain.attachment.Attachment;
 import com.example.knowledgeforge.domain.attachment.AttachmentType;
 import com.example.knowledgeforge.domain.attachment.dto.AttachmentDto;
@@ -10,7 +8,10 @@ import com.example.knowledgeforge.domain.exception.AttachmentNotFoundException;
 import com.example.knowledgeforge.domain.exception.TopicNotFoundException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.storage.AttachmentStorage;
+import com.example.knowledgeforge.repository.AttachmentRepository;
+import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.ws.ApplicationEventHub;
+import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -21,27 +22,28 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Warstwa biznesowa dla załączników — sklejenie AttachmentDao (metadane w Postgresie) i
+ * Warstwa biznesowa dla załączników — sklejenie AttachmentRepository (metadane w Postgresie) i
  * AttachmentStorage (bajty na dysku). Nigdy nie loguje treści pliku, tylko rozmiary/nazwy/id.
  */
+@Service
 public class AttachmentService {
 
     private static final Logger log = Logger.getLogger(AttachmentService.class.getName());
 
-    private final AttachmentDao attachmentDao;
+    private final AttachmentRepository attachmentRepository;
     private final AttachmentStorage storage;
-    private final TopicDao topicDao;
+    private final TopicRepository topicRepository;
     private final CurrentUser currentUser;
     private final long maxFileSizeBytes;
     private final AttachmentLockRegistry lockRegistry;
     private final ApplicationEventHub eventHub;
 
-    public AttachmentService(AttachmentDao attachmentDao, AttachmentStorage storage, TopicDao topicDao,
+    public AttachmentService(AttachmentRepository attachmentRepository, AttachmentStorage storage, TopicRepository topicRepository,
                               CurrentUser currentUser, AppConfig config, AttachmentLockRegistry lockRegistry,
                               ApplicationEventHub eventHub) {
-        this.attachmentDao = attachmentDao;
+        this.attachmentRepository = attachmentRepository;
         this.storage = storage;
-        this.topicDao = topicDao;
+        this.topicRepository = topicRepository;
         this.currentUser = currentUser;
         this.maxFileSizeBytes = config.attachmentsMaxFileSizeMb() * 1024L * 1024L;
         this.lockRegistry = lockRegistry;
@@ -54,7 +56,7 @@ public class AttachmentService {
 
     public List<AttachmentDto> listByTopic(UUID topicId) {
         verifyTopicOwnership(topicId);
-        return attachmentDao.findAllByTopicId(topicId).stream().map(AttachmentDto::from).toList();
+        return attachmentRepository.findAllByTopicId(topicId).stream().map(AttachmentDto::from).toList();
     }
 
     /**
@@ -64,6 +66,7 @@ public class AttachmentService {
      */
     public AttachmentDto upload(UUID topicId, String originalName, String declaredContentType,
                                  InputStream fileStream, String description, String clientId) {
+        Long userId = currentUser.id();
         verifyTopicOwnership(topicId);
 
         if (originalName == null || originalName.isBlank()) {
@@ -94,7 +97,7 @@ public class AttachmentService {
         a.setChecksumSha256(saved.checksumSha256());
 
         try {
-            attachmentDao.insert(a);
+            attachmentRepository.insert(a);
         } catch (RuntimeException e) {
             log.log(Level.SEVERE, "DB insert failed after saving attachment file — deleting orphaned file "
                     + saved.relativePath() + " for topic " + topicId, e);
@@ -105,7 +108,7 @@ public class AttachmentService {
         log.info(() -> "Uploaded attachment " + a.getId() + " for topic " + topicId
                 + " (" + type + ", " + saved.sizeBytes() + " bytes, name='" + a.getOriginalName() + "')");
         AttachmentDto dto = AttachmentDto.from(a);
-        eventHub.attachmentCreated(dto, String.valueOf(currentUser.id()), clientId);
+        eventHub.attachmentCreated(userId, dto, String.valueOf(userId), clientId);
         return dto;
     }
 
@@ -122,6 +125,7 @@ public class AttachmentService {
     public void delete(Long id, String clientId) {
         // MULTI-THREADING: zob. komentarz przy AttachmentLockRegistry — krótka sekcja krytyczna,
         // bez sieciowego I/O w środku (publikacja zdarzenia jest PO zwolnieniu locka).
+        Long userId = currentUser.id();
         UUID topicId = lockRegistry.withLock(id, () -> {
             Attachment a = getOwned(id);
             boolean fileDeleted = storage.delete(a.getRelativePath());
@@ -129,11 +133,11 @@ public class AttachmentService {
                 log.warning(() -> "Attachment file missing or failed to delete for id=" + id
                         + " (topic " + a.getTopicId() + ") — deleting DB record anyway");
             }
-            attachmentDao.delete(id);
+            attachmentRepository.delete(id);
             log.info(() -> "Deleted attachment " + id + " (topic " + a.getTopicId() + ")");
             return a.getTopicId();
         });
-        eventHub.attachmentDeleted(id, topicId, String.valueOf(currentUser.id()), clientId);
+        eventHub.attachmentDeleted(userId, id, topicId, String.valueOf(userId), clientId);
     }
 
     /**
@@ -142,7 +146,7 @@ public class AttachmentService {
      * automatycznie przez ON DELETE CASCADE, gdy temat zostanie usunięty chwilę później.
      */
     public void deleteFilesForTopic(UUID topicId) {
-        List<Attachment> attachments = attachmentDao.findAllByTopicId(topicId);
+        List<Attachment> attachments = attachmentRepository.findAllByTopicId(topicId);
         for (Attachment a : attachments) {
             boolean ok = storage.delete(a.getRelativePath());
             if (!ok) {
@@ -153,17 +157,17 @@ public class AttachmentService {
     }
 
     private Attachment getOwned(Long id) {
-        Attachment a = attachmentDao.findById(id)
+        Attachment a = attachmentRepository.findById(id)
                 .orElseThrow(() -> new AttachmentNotFoundException(String.valueOf(id)));
         // Załącznik "należy" do tego samego użytkownika co jego temat — jeśli temat nie jest
         // (już) własnością currentUser, traktujemy załącznik jak nieistniejący.
-        topicDao.findByIdAndUserId(a.getTopicId(), currentUser.id())
+        topicRepository.findByIdAndUserId(a.getTopicId(), currentUser.id())
                 .orElseThrow(() -> new AttachmentNotFoundException(String.valueOf(id)));
         return a;
     }
 
     private void verifyTopicOwnership(UUID topicId) {
-        topicDao.findByIdAndUserId(topicId, currentUser.id())
+        topicRepository.findByIdAndUserId(topicId, currentUser.id())
                 .orElseThrow(() -> new TopicNotFoundException(topicId.toString()));
     }
 

@@ -40,9 +40,9 @@ import java.util.logging.Logger;
  * Jeśli krok 7 się nie powiedzie, NIE udajemy sukcesu — aplikacja trwale przechodzi w stan
  * "wymagany restart" (MaintenanceGate#markAwaitingRestart): wszystkie kolejne żądania (także
  * GET) dostają 503, dopóki proces nie zostanie ręcznie zrestartowany. To świadomy wybór
- * architektoniczny, nie niedopatrzenie — przy obecnym composition roocie (Main.java) DAO
+ * architektoniczny, nie niedopatrzenie — repozytoria (przez EntityManagerFactory)
  * trzymają referencję do tej samej instancji HikariDataSource przez cały cykl życia procesu;
- * nie ma tu kontenera DI, który pozwoliłby bezpiecznie podmienić pulę pod spodem "na żywca".
+ * bezpieczna podmiana puli pod spodem "na żywca" nie jest możliwa.
  */
 public class DatabaseRestoreService {
 

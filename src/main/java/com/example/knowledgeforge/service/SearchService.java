@@ -1,12 +1,13 @@
 package com.example.knowledgeforge.service;
 
-import com.example.knowledgeforge.dao.NoteDao;
-import com.example.knowledgeforge.dao.TopicDao;
 import com.example.knowledgeforge.document.DocumentContainer;
 import com.example.knowledgeforge.domain.note.Note;
 import com.example.knowledgeforge.domain.search.SearchResultDto;
 import com.example.knowledgeforge.domain.topic.Topic;
+import com.example.knowledgeforge.repository.NoteRepository;
+import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.storage.NoteFileStorage;
+import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -22,19 +23,20 @@ import java.util.logging.Logger;
  * setki wpisów, nie miliony) to jest szybsze do napisania i zrozumienia niż
  * jakikolwiek silnik wyszukiwania, i wystarczająco szybkie w praktyce.
  */
+@Service
 public class SearchService {
 
     private static final Logger log = Logger.getLogger(SearchService.class.getName());
     private static final int SNIPPET_RADIUS = 50;
 
-    private final TopicDao topicDao;
-    private final NoteDao noteDao;
+    private final TopicRepository topicRepository;
+    private final NoteRepository noteRepository;
     private final CurrentUser currentUser;
     private final NoteFileStorage fileStorage;
 
-    public SearchService(TopicDao topicDao, NoteDao noteDao, CurrentUser currentUser, NoteFileStorage fileStorage) {
-        this.topicDao = topicDao;
-        this.noteDao = noteDao;
+    public SearchService(TopicRepository topicRepository, NoteRepository noteRepository, CurrentUser currentUser, NoteFileStorage fileStorage) {
+        this.topicRepository = topicRepository;
+        this.noteRepository = noteRepository;
         this.currentUser = currentUser;
         this.fileStorage = fileStorage;
     }
@@ -46,9 +48,9 @@ public class SearchService {
         String q = query.trim().toLowerCase(Locale.ROOT);
         Long userId = currentUser.id();
 
-        List<Topic> topics = topicDao.findAllByUserId(userId);
+        List<Topic> topics = topicRepository.findAllByUserId(userId);
         Map<UUID, Note> notesByTopic = new HashMap<>();
-        for (Note note : noteDao.findAllByUserId(userId)) {
+        for (Note note : noteRepository.findAllByUserId(userId)) {
             notesByTopic.put(note.getTopicId(), note);
         }
 

@@ -27,7 +27,7 @@ import java.util.logging.Logger;
  *
  * Konfiguracja (cron, strefa) jest parsowana i WALIDOWANA w konstruktorze — BEZWARUNKOWO,
  * niezależnie od note-bundle-backup.enabled — więc błędna wartość zawsze przerywa start aplikacji
- * jawnym wyjątkiem (Main tworzy tę instancję zawsze; dopiero {@link #start()} sprawdza `enabled`
+ * jawnym wyjątkiem (kontener Springa tworzy tę instancję zawsze; dopiero {@link #start()} sprawdza `enabled`
  * i decyduje, czy faktycznie uruchomić harmonogram).
  */
 public class NoteBundleBackupScheduler {

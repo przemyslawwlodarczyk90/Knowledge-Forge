@@ -6,6 +6,7 @@ import com.cronutils.model.definition.CronDefinitionBuilder;
 import com.cronutils.model.time.ExecutionTime;
 import com.cronutils.parser.CronParser;
 import com.example.knowledgeforge.config.AppConfig;
+import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.Period;
@@ -30,9 +31,10 @@ import java.util.logging.Logger;
  *
  * Konfiguracja (okres, cron, strefa) jest parsowana i WALIDOWANA w konstruktorze —
  * BEZWARUNKOWO, niezależnie od actuality.verification.enabled — więc błędna wartość zawsze
- * przerywa start aplikacji jawnym wyjątkiem (Main tworzy tę instancję zawsze; dopiero
+ * przerywa start aplikacji jawnym wyjątkiem (kontener Springa tworzy tę instancję zawsze; dopiero
  * {@link #start()} sprawdza `enabled` i decyduje, czy faktycznie uruchomić harmonogram).
  */
+@Component
 public class ActualityVerificationScheduler {
 
     private static final Logger log = Logger.getLogger(ActualityVerificationScheduler.class.getName());
@@ -72,6 +74,7 @@ public class ActualityVerificationScheduler {
         }
     }
 
+    @jakarta.annotation.PostConstruct
     public void start() {
         if (!config.actualityVerificationEnabled()) {
             log.info("Actuality verification scheduler disabled (actuality.verification.enabled=false)");
@@ -125,6 +128,7 @@ public class ActualityVerificationScheduler {
         }
     }
 
+    @jakarta.annotation.PreDestroy
     public void shutdown() {
         if (scheduler != null) {
             scheduler.shutdownNow();

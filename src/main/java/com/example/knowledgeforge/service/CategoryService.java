@@ -1,7 +1,5 @@
 package com.example.knowledgeforge.service;
 
-import com.example.knowledgeforge.dao.CategoryDao;
-import com.example.knowledgeforge.dao.TopicDao;
 import com.example.knowledgeforge.domain.category.CategoryNode;
 import com.example.knowledgeforge.domain.category.dto.CategoryDto;
 import com.example.knowledgeforge.domain.category.dto.CategoryTreeDto;
@@ -11,34 +9,38 @@ import com.example.knowledgeforge.domain.exception.CategoryNotFoundException;
 import com.example.knowledgeforge.domain.exception.ConflictException;
 import com.example.knowledgeforge.domain.exception.ForbiddenException;
 import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.repository.CategoryRepository;
+import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.ws.ApplicationEventHub;
+import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Service
 public class CategoryService {
 
-    private final CategoryDao categoryDao;
-    private final TopicDao topicDao;
+    private final CategoryRepository categoryRepository;
+    private final TopicRepository topicRepository;
     private final CurrentUser currentUser;
     private final ApplicationEventHub eventHub;
 
-    public CategoryService(CategoryDao categoryDao, TopicDao topicDao, CurrentUser currentUser, ApplicationEventHub eventHub) {
-        this.categoryDao = categoryDao;
-        this.topicDao = topicDao;
+    public CategoryService(CategoryRepository categoryRepository, TopicRepository topicRepository, CurrentUser currentUser, ApplicationEventHub eventHub) {
+        this.categoryRepository = categoryRepository;
+        this.topicRepository = topicRepository;
         this.currentUser = currentUser;
         this.eventHub = eventHub;
     }
 
     public CategoryTreeDto getTree() {
         Long userId = currentUser.id();
-        CategoryNode root = categoryDao.findByUserIdAndRootTrue(userId)
+        CategoryNode root = categoryRepository.findByUserIdAndRootTrue(userId)
                 .orElseGet(() -> createVirtualRoot(userId));
-        List<CategoryNode> all = categoryDao.findAllByUserId(userId);
-        Map<UUID, Integer> topicCounts = topicDao.countByCategoryForUser(userId);
-        Map<UUID, Integer> lowDetailCounts = topicDao.countLowDetailByCategoryForUser(userId);
+        List<CategoryNode> all = categoryRepository.findAllByUserId(userId);
+        Map<UUID, Integer> topicCounts = topicRepository.countByCategoryForUser(userId);
+        Map<UUID, Integer> lowDetailCounts = topicRepository.countLowDetailByCategoryForUser(userId);
         return buildTree(root, all, topicCounts, lowDetailCounts);
     }
 
@@ -49,15 +51,15 @@ public class CategoryService {
 
         Long userId = currentUser.id();
 
-        CategoryNode root = categoryDao.findByUserIdAndRootTrue(userId)
+        CategoryNode root = categoryRepository.findByUserIdAndRootTrue(userId)
                 .orElseGet(() -> createVirtualRoot(userId));
 
         UUID parentId = req.parentId() != null ? req.parentId() : root.getId();
 
-        categoryDao.findByIdAndUserId(parentId, userId)
+        categoryRepository.findByIdAndUserId(parentId, userId)
                 .orElseThrow(() -> new CategoryNotFoundException(parentId.toString()));
 
-        long nameCount = categoryDao.countByUserIdAndParentIdAndNameIgnoreCase(userId, parentId, req.name());
+        long nameCount = categoryRepository.countByUserIdAndParentIdAndNameIgnoreCase(userId, parentId, req.name());
         if (nameCount > 0) {
             throw new ConflictException("A category with name '" + req.name() + "' already exists at this level.");
         }
@@ -69,8 +71,8 @@ public class CategoryService {
         node.setPosition(0);
         node.setRoot(false);
 
-        CategoryDto dto = CategoryDto.from(categoryDao.insert(node));
-        eventHub.categoryCreated(dto, String.valueOf(userId), clientId);
+        CategoryDto dto = CategoryDto.from(categoryRepository.insert(node));
+        eventHub.categoryCreated(userId, dto, String.valueOf(userId), clientId);
         return dto;
     }
 
@@ -80,7 +82,7 @@ public class CategoryService {
         }
 
         Long userId = currentUser.id();
-        CategoryNode node = categoryDao.findByIdAndUserId(id, userId)
+        CategoryNode node = categoryRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new CategoryNotFoundException(id.toString()));
 
         if (node.isRoot()) {
@@ -89,30 +91,30 @@ public class CategoryService {
 
         node.setName(req.name());
 
-        CategoryDto dto = CategoryDto.from(categoryDao.update(node));
-        eventHub.categoryUpdated(dto, String.valueOf(userId), clientId);
+        CategoryDto dto = CategoryDto.from(categoryRepository.update(node));
+        eventHub.categoryUpdated(userId, dto, String.valueOf(userId), clientId);
         return dto;
     }
 
     public void delete(UUID id, String clientId) {
         Long userId = currentUser.id();
-        CategoryNode node = categoryDao.findByIdAndUserId(id, userId)
+        CategoryNode node = categoryRepository.findByIdAndUserId(id, userId)
                 .orElseThrow(() -> new CategoryNotFoundException(id.toString()));
 
         if (node.isRoot()) {
             throw new ForbiddenException("Cannot delete the virtual root node.");
         }
 
-        if (categoryDao.existsByParentId(id)) {
+        if (categoryRepository.existsByParentId(id)) {
             throw new ConflictException("Category has sub-categories. Remove them first.");
         }
 
-        if (topicDao.existsByUserIdAndCategoryId(userId, id)) {
+        if (topicRepository.existsByUserIdAndCategoryId(userId, id)) {
             throw new ConflictException("Category has topics. Remove them first.");
         }
 
-        categoryDao.delete(id);
-        eventHub.categoryDeleted(id, node.getParentId(), String.valueOf(userId), clientId);
+        categoryRepository.deleteRowById(id);
+        eventHub.categoryDeleted(userId, id, node.getParentId(), String.valueOf(userId), clientId);
     }
 
     private CategoryNode createVirtualRoot(Long userId) {
@@ -121,7 +123,7 @@ public class CategoryService {
         root.setName("__ROOT__");
         root.setPosition(0);
         root.setRoot(true);
-        return categoryDao.insert(root);
+        return categoryRepository.insert(root);
     }
 
     private CategoryTreeDto buildTree(CategoryNode root, List<CategoryNode> all, Map<UUID, Integer> topicCounts,

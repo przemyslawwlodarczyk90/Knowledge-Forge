@@ -1,7 +1,5 @@
 package com.example.knowledgeforge.service;
 
-import com.example.knowledgeforge.dao.CategoryDao;
-import com.example.knowledgeforge.dao.NoteDao;
 import com.example.knowledgeforge.document.DocumentContainer;
 import com.example.knowledgeforge.domain.category.CategoryNode;
 import com.example.knowledgeforge.domain.exception.ConflictException;
@@ -14,13 +12,16 @@ import com.example.knowledgeforge.domain.note.dto.SaveNoteRequest;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.domain.topic.TopicStatus;
 import com.example.knowledgeforge.domain.topic.dto.TopicDto;
+import com.example.knowledgeforge.repository.CategoryRepository;
+import com.example.knowledgeforge.repository.NoteRepository;
+import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.storage.NoteFileStorage;
 import com.example.knowledgeforge.ws.ApplicationEventHub;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
@@ -37,27 +38,28 @@ import java.util.logging.Logger;
  * (kliknięcie "Pobierz PDF"), żeby setki notatek nie puchły plikami PDF,
  * których nikt nigdy nie pobierze.
  */
+@Service
 public class NoteService {
 
     private static final Logger log = Logger.getLogger(NoteService.class.getName());
 
-    private final DataSource dataSource;
-    private final NoteDao noteDao;
+    private final TransactionTemplate transactionTemplate;
+    private final NoteRepository noteRepository;
     private final TopicService topicService;
-    private final com.example.knowledgeforge.dao.TopicDao topicDao;
-    private final CategoryDao categoryDao;
+    private final TopicRepository topicRepository;
+    private final CategoryRepository categoryRepository;
     private final CurrentUser currentUser;
     private final NoteFileStorage fileStorage;
     private final ApplicationEventHub eventHub;
 
-    public NoteService(DataSource dataSource, NoteDao noteDao, TopicService topicService,
-                        com.example.knowledgeforge.dao.TopicDao topicDao, CategoryDao categoryDao,
+    public NoteService(PlatformTransactionManager transactionManager, NoteRepository noteRepository, TopicService topicService,
+                        TopicRepository topicRepository, CategoryRepository categoryRepository,
                         CurrentUser currentUser, NoteFileStorage fileStorage, ApplicationEventHub eventHub) {
-        this.dataSource = dataSource;
-        this.noteDao = noteDao;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.noteRepository = noteRepository;
         this.topicService = topicService;
-        this.topicDao = topicDao;
-        this.categoryDao = categoryDao;
+        this.topicRepository = topicRepository;
+        this.categoryRepository = categoryRepository;
         this.currentUser = currentUser;
         this.fileStorage = fileStorage;
         this.eventHub = eventHub;
@@ -66,7 +68,7 @@ public class NoteService {
     public NoteDto getByTopicId(UUID topicId) {
         Long userId = currentUser.id();
         topicService.verifyOwnership(topicId, userId);
-        Note note = noteDao.findByTopicIdAndUserId(topicId, userId)
+        Note note = noteRepository.findByTopicIdAndUserId(topicId, userId)
                 .orElseThrow(() -> new NoteNotFoundException(topicId.toString()));
         log.fine(() -> "getByTopicId " + topicId + " -> version=" + note.getVersion()
                 + " contentPath=" + note.getContentPath());
@@ -85,15 +87,15 @@ public class NoteService {
 
         Long userId = currentUser.id();
         Topic topicForMetadata = topicService.verifyOwnership(topicId, userId);
-        CategoryNode category = categoryDao.findByIdAndUserId(topicForMetadata.getCategoryId(), userId).orElse(null);
+        CategoryNode category = categoryRepository.findByIdAndUserId(topicForMetadata.getCategoryId(), userId).orElse(null);
 
         int assetCount = req.assets() == null ? 0 : req.assets().size();
         log.info(() -> "save " + topicId + ": incoming assets=" + assetCount);
 
-        Note existing = noteDao.findByTopicId(topicId).orElse(null);
+        Note existing = noteRepository.findByTopicId(topicId).orElse(null);
 
         // Szybki, wczesny fail przed jakimkolwiek zapisem na dysk — właściwym (rozstrzygającym)
-        // strażnikiem jest i tak warunek "WHERE version = ?" w SQL poniżej; to tylko unika
+        // strażnikiem jest i tak warunek "WHERE version = ?" w UPDATE poniżej; to tylko unika
         // niepotrzebnego zapisu pliku, gdy konflikt jest oczywisty od razu.
         if (existing != null) {
             if (req.baseVersion() == null) {
@@ -123,78 +125,67 @@ public class NoteService {
         String contentPath = fileStorage.writeContent(topicId, contentBytes);
         log.fine(() -> "save " + topicId + ": wrote content -> " + contentPath);
 
-        Note note;
-        TopicStatus finalStatus;
-        Topic updatedTopic;
         // MULTI-THREADING:
-        // Jedna transakcja JDBC obejmuje: (1) warunkowy UPDATE/INSERT notatki z optimistic
-        // lockingiem (WHERE version = ?) i (2) BEZWARUNKOWĄ (przy każdym udanym zapisie, nie
+        // Jedna transakcja (TransactionTemplate) obejmuje: (1) warunkowy UPDATE/INSERT notatki z
+        // optimistic lockingiem (WHERE version = ?) i (2) BEZWARUNKOWĄ (przy każdym udanym zapisie, nie
         // tylko przy pierwszym) zmianę tematu — ewentualne przejście statusu NEW -> NOTE_ADDED
         // ORAZ potwierdzenie aktualności (actualityVerified=true, lastVerificationOfActualityDate
         // =teraz — zob. dokumentacja/ACTUALITY_VERIFICATION.txt), jednym atomowym UPDATE-em bumpującym
-        // topic.version DOKŁADNIE RAZ (TopicDao#markNoteSaved), na świeżo odczytanej w tej
-        // transakcji wersji tematu. Obie zmiany (notatka + temat) muszą zajść razem albo wcale —
-        // inaczej moglibyśmy zapisać notatkę, a temat zostawić w złym/nieaktualnym stanie,
-        // widocznym dla innych żądań. Zakres blokady/transakcji to WYŁĄCZNIE te dwa zapytania
-        // SQL — żadnego I/O na plikach ani komunikacji WebSocket wewnątrz. commit/rollback +
-        // zamknięcie połączenia są w finally, zanim cokolwiek zostanie rozgłoszone.
-        try (Connection con = dataSource.getConnection()) {
-            con.setAutoCommit(false);
-            try {
-                if (existing != null) {
-                    int affected = noteDao.updateWithVersionCheck(con, existing.getId(), contentPath, nextVersion, req.baseVersion());
-                    if (affected == 0) {
-                        con.rollback();
-                        throw new ConflictException("Note was modified by someone else in the meantime");
-                    }
-                    existing.setContentPath(contentPath);
-                    existing.setVersion(nextVersion);
-                    note = existing;
-                    log.info(() -> "save " + topicId + ": updated note " + note.getId() + " -> version=" + note.getVersion());
-                } else {
-                    Note fresh = new Note();
-                    fresh.setId(noteId);
-                    fresh.setUserId(userId);
-                    fresh.setTopicId(topicId);
-                    fresh.setContentPath(contentPath);
-                    fresh.setVersion(1);
-                    fresh.setCreatedAt(noteCreatedAt);
-                    noteDao.insert(con, fresh);
-                    note = fresh;
-                    log.info(() -> "save " + topicId + ": created note " + note.getId());
-                }
-
-                Topic freshTopic = topicDao.findByIdAndUserId(con, topicId, userId)
-                        .orElseThrow(() -> new NotFoundException("Topic disappeared during note save: " + topicId));
-                finalStatus = freshTopic.getStatus() == TopicStatus.NEW ? TopicStatus.NOTE_ADDED : freshTopic.getStatus();
-                Instant verifiedAt = Instant.now();
-                int affected = topicDao.markNoteSaved(con, topicId, finalStatus, freshTopic.getVersion(), verifiedAt);
+        // topic.version DOKŁADNIE RAZ (TopicRepository#markNoteSaved), na świeżo odczytanej w tej
+        // transakcji wersji tematu. Obie zmiany (notatka + temat) zachodzą razem albo wcale —
+        // ConflictException rzucony w środku cofa całą transakcję. Zakres transakcji to WYŁĄCZNIE
+        // te zapytania SQL — żadnego I/O na plikach ani komunikacji WebSocket wewnątrz; zdarzenia
+        // są rozgłaszane dopiero po commicie.
+        SaveOutcome outcome = transactionTemplate.execute(status -> {
+            Note note;
+            if (existing != null) {
+                int affected = noteRepository.updateWithVersionCheck(existing.getId(), contentPath, nextVersion, req.baseVersion());
                 if (affected == 0) {
-                    con.rollback();
-                    throw new ConflictException("Topic was modified by someone else in the meantime");
+                    throw new ConflictException("Note was modified by someone else in the meantime");
                 }
-                freshTopic.setStatus(finalStatus);
-                freshTopic.setActualityVerified(true);
-                freshTopic.setLastVerificationOfActualityDate(verifiedAt);
-                freshTopic.setVersion(freshTopic.getVersion() + 1);
-                updatedTopic = freshTopic;
-
-                con.commit();
-            } catch (Exception e) {
-                safeRollback(con);
-                throw e;
-            } finally {
-                con.setAutoCommit(true);
+                existing.setContentPath(contentPath);
+                existing.setVersion(nextVersion);
+                note = existing;
+                log.info(() -> "save " + topicId + ": updated note " + note.getId() + " -> version=" + note.getVersion());
+            } else {
+                Note fresh = new Note();
+                fresh.setId(noteId);
+                fresh.setUserId(userId);
+                fresh.setTopicId(topicId);
+                fresh.setContentPath(contentPath);
+                fresh.setVersion(1);
+                fresh.setCreatedAt(noteCreatedAt);
+                noteRepository.insert(fresh);
+                note = fresh;
+                log.info(() -> "save " + topicId + ": created note " + note.getId());
             }
-        } catch (SQLException e) {
-            throw new RuntimeException("Failed to open transaction for note save", e);
-        }
 
-        eventHub.noteSaved(note.getId(), topicId, note.getVersion(), finalStatus, String.valueOf(userId), clientId);
+            Topic freshTopic = topicRepository.findByIdAndUserId(topicId, userId)
+                    .orElseThrow(() -> new NotFoundException("Topic disappeared during note save: " + topicId));
+            TopicStatus finalStatus = freshTopic.getStatus() == TopicStatus.NEW ? TopicStatus.NOTE_ADDED : freshTopic.getStatus();
+            Instant verifiedAt = Instant.now();
+            int affected = topicRepository.markNoteSaved(topicId, finalStatus, freshTopic.getVersion(), verifiedAt);
+            if (affected == 0) {
+                throw new ConflictException("Topic was modified by someone else in the meantime");
+            }
+            // markNoteSaved czyści kontekst persystencji (clearAutomatically) — freshTopic jest już
+            // odłączony, więc poniższe settery NIE generują żadnego dodatkowego UPDATE-u.
+            freshTopic.setStatus(finalStatus);
+            freshTopic.setActualityVerified(true);
+            freshTopic.setLastVerificationOfActualityDate(verifiedAt);
+            freshTopic.setVersion(freshTopic.getVersion() + 1);
+            return new SaveOutcome(note, finalStatus, freshTopic);
+        });
+
+        Note note = outcome.note();
+        TopicStatus finalStatus = outcome.finalStatus();
+        Topic updatedTopic = outcome.updatedTopic();
+
+        eventHub.noteSaved(userId, note.getId(), topicId, note.getVersion(), finalStatus, String.valueOf(userId), clientId);
         // Temat mógł zmienić version (status i/lub potwierdzenie aktualności) — rozgłaszamy
         // pełny, świeży TopicDto, żeby żadna otwarta karta (w tym panel "Weryfikacja aktualności")
         // nie została ze starą wersją (zob. NotePanel#onTopicUpdated, który już to konsumuje).
-        eventHub.topicUpdated(TopicDto.from(updatedTopic), String.valueOf(userId), clientId);
+        eventHub.topicUpdated(userId, TopicDto.from(updatedTopic), String.valueOf(userId), clientId);
 
         return toDto(note);
     }
@@ -202,7 +193,7 @@ public class NoteService {
     public byte[] getAsset(UUID topicId, String filename) {
         Long userId = currentUser.id();
         topicService.verifyOwnership(topicId, userId);
-        Note note = noteDao.findByTopicIdAndUserId(topicId, userId)
+        Note note = noteRepository.findByTopicIdAndUserId(topicId, userId)
                 .orElseThrow(() -> new NoteNotFoundException(topicId.toString()));
         byte[] data = DocumentContainer.fromBytes(fileStorage.read(note.getContentPath())).asset(filename);
         if (data == null) {
@@ -261,7 +252,7 @@ public class NoteService {
         while (current != null && guard++ < 64) {
             path.addFirst(current.getName());
             UUID parentId = current.getParentId();
-            current = parentId == null ? null : categoryDao.findByIdAndUserId(parentId, userId).orElse(null);
+            current = parentId == null ? null : categoryRepository.findByIdAndUserId(parentId, userId).orElse(null);
         }
         return path;
     }
@@ -275,10 +266,7 @@ public class NoteService {
         return map;
     }
 
-    private static void safeRollback(Connection con) {
-        try {
-            con.rollback();
-        } catch (SQLException ignored) {
-        }
+    private record SaveOutcome(Note note, TopicStatus finalStatus, Topic updatedTopic) {
     }
+
 }
