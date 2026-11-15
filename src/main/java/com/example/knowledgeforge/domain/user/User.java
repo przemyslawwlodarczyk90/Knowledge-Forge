@@ -1,20 +1,40 @@
 package com.example.knowledgeforge.domain.user;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+/** Konto użytkownika — hasło jako hash BCrypt, rola USER/ADMIN. Dane (kategorie/tematy/notatki) są per-użytkownik. */
+@Entity
+@Table(name = "users")
 public class User {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "username", nullable = false, unique = true)
     private String username;
+
+    @Column(name = "email", nullable = false)
     private String email;
+
+    @Column(name = "password")
+    private String password;
+
+    @Column(name = "active", nullable = false)
     private boolean active;
 
-    public User() {
-    }
+    @Enumerated(EnumType.STRING)
+    @Column(name = "role", nullable = false)
+    private Role role = Role.USER;
 
-    public User(Long id, String username, String email, boolean active) {
-        this.id = id;
-        this.username = username;
-        this.email = email;
-        this.active = active;
+    public User() {
     }
 
     public Long getId() { return id; }
@@ -26,6 +46,12 @@ public class User {
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
 
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
+
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
+
+    public Role getRole() { return role; }
+    public void setRole(Role role) { this.role = role; }
 }

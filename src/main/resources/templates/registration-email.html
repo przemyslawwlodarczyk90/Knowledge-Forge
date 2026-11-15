@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" lang="pl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Potwierdź rejestrację — Knowledge-Forge</title>
+</head>
+<body style="margin:0;padding:0;background-color:#050d1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="background-color:#050d1a;padding:40px 16px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+             style="max-width:560px;">
+
+        <!-- ── LOGO HEADER ── -->
+        <tr>
+          <td style="padding-bottom:24px;text-align:center;">
+            <!-- Monogram -->
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;margin:0 auto 16px;">
+              <tr>
+                <td style="background:linear-gradient(135deg,#2563eb 0%,#1a56d6 100%);
+                           border-radius:14px;width:52px;height:52px;text-align:center;
+                           vertical-align:middle;
+                           box-shadow:0 4px 16px rgba(37,99,235,0.4);">
+                  <span style="font-size:1.2rem;font-weight:900;color:#fff;letter-spacing:-1px;">KF</span>
+                </td>
+              </tr>
+            </table>
+            <!-- Wordmark -->
+            <div style="line-height:1;">
+              <span style="display:block;font-size:13px;font-weight:300;color:#7090b0;letter-spacing:0.05em;">Knowledge</span>
+              <span style="display:block;font-size:22px;font-weight:800;color:#f0f4ff;letter-spacing:-0.02em;margin-top:2px;">Forge</span>
+            </div>
+          </td>
+        </tr>
+
+        <!-- ── MAIN CARD ── -->
+        <tr>
+          <td style="background-color:#0a1628;border-radius:16px;overflow:hidden;
+                     border:1px solid #1e3a65;">
+
+            <!-- Top accent bar -->
+            <div style="height:2px;background:linear-gradient(90deg,transparent,#2563eb 40%,#38bdf8 70%,transparent);"></div>
+
+            <!-- Card body -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="padding:40px 44px 36px;">
+
+                  <!-- Greeting -->
+                  <p style="margin:0 0 6px;font-size:13px;font-family:'Courier New',monospace;
+                            letter-spacing:0.1em;text-transform:uppercase;color:#4a6080;">
+                    Weryfikacja konta
+                  </p>
+                  <h1 style="margin:0 0 24px;font-size:26px;font-weight:800;
+                             color:#f0f4ff;letter-spacing:-0.02em;line-height:1.2;">
+                    Cześć,
+                    <span style="color:#38bdf8;" th:text="${username}">Użytkowniku</span>!
+                  </h1>
+
+                  <!-- Divider line -->
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:24px;">
+                    <tr>
+                      <td style="height:1px;background:linear-gradient(90deg,#2563eb,transparent);opacity:0.4;"></td>
+                    </tr>
+                  </table>
+
+                  <!-- Body text -->
+                  <p style="margin:0 0 10px;font-size:15px;color:#a8c0e0;line-height:1.7;">
+                    Dziękujemy za rejestrację w platformie <strong style="color:#f0f4ff;">Knowledge-Forge</strong>.
+                  </p>
+                  <p style="margin:0 0 32px;font-size:14px;color:#7090b0;line-height:1.7;">
+                    Aby aktywować swoje konto i uzyskać pełny dostęp do encyklopedii,
+                    kliknij przycisk potwierdzenia poniżej. Link jest ważny przez <strong style="color:#a8c0e0;">24 godziny</strong>.
+                  </p>
+
+                  <!-- CTA Button -->
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:36px;">
+                    <tr>
+                      <td style="border-radius:10px;
+                                 background:linear-gradient(135deg,#2563eb,#1a56d6);
+                                 box-shadow:0 4px 20px rgba(37,99,235,0.4);">
+                        <a th:href="${confirmationLink}"
+                           style="display:inline-block;padding:14px 36px;
+                                  color:#ffffff;text-decoration:none;
+                                  font-size:13px;font-weight:700;
+                                  letter-spacing:0.05em;font-family:'Courier New',monospace;">
+                          POTWIERDŹ KONTO →
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+
+                  <!-- Info box -->
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td style="background:rgba(37,99,235,0.06);border:1px solid rgba(37,99,235,0.2);
+                                 border-radius:8px;padding:14px 18px;">
+                        <p style="margin:0;font-size:12px;color:#4a6080;line-height:1.6;">
+                          Jeśli przycisk nie działa, skopiuj i wklej ten link do przeglądarki:<br/>
+                          <a th:href="${confirmationLink}" style="color:#2563eb;font-family:'Courier New',monospace;font-size:11px;word-break:break-all;"
+                             th:text="${confirmationLink}">link</a>
+                        </p>
+                      </td>
+                    </tr>
+                  </table>
+
+                </td>
+              </tr>
+            </table>
+
+            <!-- Footer -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="padding:18px 44px;border-top:1px solid #0f1f38;background-color:#050d1a;border-radius:0 0 16px 16px;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td>
+                        <p style="margin:0;font-size:11px;color:#2a3f5a;font-family:'Courier New',monospace;line-height:1.6;">
+                          Knowledge-Forge &copy; 2025 &nbsp;·&nbsp; Wygenerowano automatycznie<br/>
+                          Jeśli nie zakładałeś konta, zignoruj tę wiadomość.
+                        </p>
+                      </td>
+                      <td align="right">
+                        <p style="margin:0;font-size:11px;color:#1e3a65;font-family:'Courier New',monospace;">
+                          KF / v1
+                        </p>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
+
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+
+</body>
+</html>
