@@ -1,5 +1,14 @@
 package com.example.knowledgeforge.domain.attachment;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
 import java.time.Instant;
 import java.util.UUID;
 
@@ -9,18 +18,43 @@ import java.util.UUID;
  * Ani relativePath, ani storedName nigdy nie trafiają do odpowiedzi HTTP (zob. dto.AttachmentDto) —
  * publiczne adresy (/api/attachments/{id}/view|download) są generowane wyłącznie na podstawie id.
  */
+@Entity
+@Table(name = "attachment")
 public class Attachment {
 
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "topic_id", nullable = false)
     private UUID topicId;
+
+    @Column(name = "original_name", nullable = false)
     private String originalName;
+
+    @Column(name = "stored_name", nullable = false)
     private String storedName;
+
+    @Column(name = "relative_path", nullable = false)
     private String relativePath;
+
+    @Column(name = "content_type")
     private String contentType;
+
+    @Column(name = "size_bytes", nullable = false)
     private long sizeBytes;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "attachment_type", nullable = false)
     private AttachmentType attachmentType;
+
+    @Column(name = "description")
     private String description;
+
+    @Column(name = "checksum_sha256", nullable = false)
     private String checksumSha256;
+
+    @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
     public Attachment() {
