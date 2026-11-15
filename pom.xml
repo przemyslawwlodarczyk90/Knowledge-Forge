@@ -30,7 +30,21 @@
         <java.version>17</java.version>
         <java-jwt.version>4.4.0</java-jwt.version>
         <cron-utils.version>9.2.1</cron-utils.version>
+        <spring-ai.version>1.0.3</spring-ai.version>
+        <jacoco.version>0.8.12</jacoco.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -66,6 +80,18 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- SPRING AI — generowanie notatek przez OpenAI (ChatClient). Sama biblioteka, BEZ startera:
+             model budujemy ręcznie w ai.AiConfig tylko wtedy, gdy OPENAI_API_KEY jest ustawiony, więc
+             aplikacja startuje normalnie również bez klucza. -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-openai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-client-chat</artifactId>
         </dependency>
 
         <!-- JWT -->
