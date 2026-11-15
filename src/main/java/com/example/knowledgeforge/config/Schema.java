@@ -24,16 +24,33 @@ public final class Schema {
     private static final Logger log = Logger.getLogger(Schema.class.getName());
 
     private static final List<String> STATEMENTS = List.of(
+            // UWAGA: tabela users bywa współdzielona z innymi aplikacjami w tej samej bazie —
+            // migracje tylko DOKŁADAJĄ brakujące kolumny, nigdy niczego z niej nie usuwają.
             """
             CREATE TABLE IF NOT EXISTS users (
                 id BIGSERIAL PRIMARY KEY,
                 username TEXT NOT NULL UNIQUE,
                 email TEXT NOT NULL,
-                active BOOLEAN NOT NULL DEFAULT FALSE
+                password TEXT,
+                active BOOLEAN NOT NULL DEFAULT FALSE,
+                role TEXT NOT NULL DEFAULT 'USER'
             )
             """,
-            "ALTER TABLE users DROP COLUMN IF EXISTS password",
-            "ALTER TABLE users DROP COLUMN IF EXISTS role",
+            // Logowanie wróciło (Spring Security + JWT) — hasło (BCrypt) i rola USER/ADMIN.
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'",
+
+            // Tokeny aktywacyjne z maila rejestracyjnego — ten sam kształt, co na masterze.
+            """
+            CREATE TABLE IF NOT EXISTS confirmation_tokens (
+                id BIGSERIAL PRIMARY KEY,
+                token VARCHAR(500) NOT NULL UNIQUE,
+                created_at TIMESTAMP NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                confirmed_at TIMESTAMP,
+                user_id BIGINT NOT NULL
+            )
+            """,
 
             """
             CREATE TABLE IF NOT EXISTS category_node (
@@ -70,7 +87,7 @@ public final class Schema {
 
             // Optimistic locking — chroni przed cichym nadpisaniem, gdy dwóch użytkowników
             // edytuje ten sam temat (np. poziom szczegółowości) prawie jednocześnie.
-            // Zob. TopicDao#update / TopicDao#updateStatus (WHERE version = ?).
+            // Zob. TopicRepository#update / TopicRepository#markNoteSaved (WHERE version = ?).
             "ALTER TABLE topic ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1",
 
             "ALTER TABLE topic ADD COLUMN IF NOT EXISTS type TEXT",

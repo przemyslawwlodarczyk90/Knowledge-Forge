@@ -1,55 +1,42 @@
 package com.example.knowledgeforge.config;
 
-import java.io.IOException;
-import java.io.InputStream;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
+import org.springframework.stereotype.Component;
+
 import java.time.Period;
 import java.time.ZoneId;
-import java.util.Locale;
 import java.util.Properties;
+import java.util.function.UnaryOperator;
 
 /**
- * Ładuje config.properties z classpath, opcjonalnie nadpisywany przez
- * config-local.properties (gitignorowany, na sekrety lokalne) i przez
- * zmienne środowiskowe — konwencja: "db.url" -> zmienna "DB_URL".
- * Zastępuje mechanizm @Value / @ConfigurationProperties ze Springa.
+ * Jedno miejsce z typowanymi odczytami konfiguracji aplikacji. Wartości pochodzą ze Springowego
+ * {@link Environment} (application.properties, opcjonalne config-local.properties /
+ * application-local.properties, zmienne środowiskowe — konwencja Springa: "db.url" -> "DB_URL").
+ * Domyślne wartości i walidacja (okres, strefa, cron) są identyczne jak przed migracją na Springa.
  */
+@Component
 public class AppConfig {
 
-    private final Properties props;
+    private final UnaryOperator<String> lookup;
 
-    private AppConfig(Properties props) {
-        this.props = props;
+    @Autowired
+    public AppConfig(Environment environment) {
+        this(environment::getProperty);
     }
 
-    public static AppConfig load() {
-        Properties props = new Properties();
-        loadInto(props, "/config.properties", true);
-        loadInto(props, "/config-local.properties", false);
-        return new AppConfig(props);
+    private AppConfig(UnaryOperator<String> lookup) {
+        this.lookup = lookup;
     }
 
-    /** Buduje AppConfig z gotowych Properties, z pominięciem odczytu z classpath — używane przez testy. */
+    /** Buduje AppConfig z gotowych Properties, bez kontekstu Springa — używane przez testy. */
     public static AppConfig fromProperties(Properties props) {
-        return new AppConfig(props);
-    }
-
-    private static void loadInto(Properties props, String resource, boolean required) {
-        try (InputStream in = AppConfig.class.getResourceAsStream(resource)) {
-            if (in == null) {
-                if (required) throw new IllegalStateException("Missing required classpath resource: " + resource);
-                return;
-            }
-            props.load(in);
-        } catch (IOException e) {
-            throw new IllegalStateException("Failed to load " + resource, e);
-        }
+        return new AppConfig(props::getProperty);
     }
 
     private String get(String key, String defaultValue) {
-        String envKey = key.toUpperCase(Locale.ROOT).replace('.', '_').replace('-', '_');
-        String fromEnv = System.getenv(envKey);
-        if (fromEnv != null && !fromEnv.isBlank()) return fromEnv;
-        return props.getProperty(key, defaultValue);
+        String value = lookup.apply(key);
+        return value == null || value.isBlank() ? defaultValue : value;
     }
 
     public int serverPort() {
@@ -72,12 +59,52 @@ public class AppConfig {
         return get("cors.allowed-origin", "http://localhost:3000");
     }
 
-    public String defaultUsername() {
-        return get("default-user.username", "default");
+    /** Adres frontendu — baza linku aktywacyjnego w mailu rejestracyjnym. */
+    public String frontendBaseUrl() {
+        return get("app.frontend.base-url", "http://localhost:3000");
     }
 
-    public String defaultUserEmail() {
-        return get("default-user.email", "default@knowledge-forge.local");
+    // ===============================
+    // UWIERZYTELNIANIE
+    // ===============================
+
+    public String jwtSecret() {
+        return get("jwt.secret", "");
+    }
+
+    public String jwtIssuer() {
+        return get("jwt.issuer", "knowledge-forge");
+    }
+
+    public long jwtExpirationTimeMs() {
+        return Long.parseLong(get("jwt.expiration-time-ms", "28800000"));
+    }
+
+    /** true = logowanie wymaga aktywnego konta (potwierdzonego linkiem z maila). */
+    public boolean requireEmailConfirmation() {
+        return Boolean.parseBoolean(get("app.auth.require-email-confirmation", "false"));
+    }
+
+    public String adminUsername() {
+        return get("app.admin.username", "admin");
+    }
+
+    public String adminEmail() {
+        return get("app.admin.email", "admin@knowledge-forge.local");
+    }
+
+    public String adminPassword() {
+        return get("app.admin.password", "Admin123!");
+    }
+
+    /** Nazwa dawnego wspólnego konta z wersji bez logowania (wszystkie dane były przypisane do niego). */
+    public String legacyDefaultUsername() {
+        return get("legacy.default-user.username", "default");
+    }
+
+    /** Konto, na które jednorazowo przenieść dane dawnego konta "default" — puste = wyłączone. */
+    public String legacyDefaultUserTransferTo() {
+        return get("legacy.default-user.transfer-to", "");
     }
 
     /** Folder na dysku, gdzie leżą pliki notatek (.kfdoc) i wygenerowane PDF-y — baza trzyma tylko ścieżki. */
@@ -99,7 +126,7 @@ public class AppConfig {
         return get("attachments.storage.path", "./data/attachments");
     }
 
-    /** Maksymalny rozmiar pojedynczego załącznika w MB — egzekwowany zarówno przez Jetty, jak i strumieniowo w AttachmentStorage. */
+    /** Maksymalny rozmiar pojedynczego załącznika w MB — egzekwowany zarówno przez kontener (multipart), jak i strumieniowo w AttachmentStorage. */
     public long attachmentsMaxFileSizeMb() {
         return Long.parseLong(get("attachments.max-file-size-mb", "100"));
     }
@@ -171,7 +198,7 @@ public class AppConfig {
     /**
      * Okres ważności jako java.time.Period (kalendarzowy — lata/miesiące/dni, nie sztywna liczba
      * sekund), np. "P2Y" = 2 lata. Parsowane (i więc zwalidowane) przy KAŻDYM wywołaniu — celowo
-     * wołane raz, jawnie, zaraz po starcie (zob. Main / ActualityVerificationScheduler), żeby
+     * wołane raz, jawnie, zaraz po starcie (zob. ActualityVerificationScheduler), żeby
      * błędny format przerwał uruchomienie aplikacji jednoznacznym wyjątkiem, zamiast po cichu
      * wyłączyć mechanizm dopiero przy pierwszej próbie użycia.
      */
