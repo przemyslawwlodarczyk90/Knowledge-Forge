@@ -46,16 +46,13 @@ public final class TestJpa {
                     // Argumenty linii poleceń mają NAJWYŻSZY priorytet — nadpisują application.properties
                     // (SpringApplicationBuilder#properties to tylko wartości domyślne i przegrywa z nim,
                     // przez co testy trafiłyby do roboczej bazy).
+                    java.util.List<String> args = new java.util.ArrayList<>();
+                    args.add("--spring.main.banner-mode=off");
+                    TestEnv.values(java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "kf-test-jpa"))
+                            .forEach((k, v) -> args.add("--" + k + "=" + v));
                     ConfigurableApplicationContext started = new SpringApplicationBuilder(Config.class)
                             .web(WebApplicationType.NONE)
-                            .run("--spring.main.banner-mode=off",
-                                    "--db.url=" + TestDatabase.URL,
-                                    "--db.username=" + TestDatabase.USER,
-                                    "--db.password=" + TestDatabase.PASSWORD,
-                                    "--spring.datasource.url=" + TestDatabase.URL,
-                                    "--spring.datasource.username=" + TestDatabase.USER,
-                                    "--spring.datasource.password=" + TestDatabase.PASSWORD,
-                                    "--spring.datasource.hikari.maximum-pool-size=10");
+                            .run(args.toArray(String[]::new));
                     assertTestSchema(started);
                     context = started;
                     Runtime.getRuntime().addShutdownHook(new Thread(started::close));
