@@ -6,10 +6,18 @@ import com.example.knowledgeforge.backup.DatabaseRestoreService;
 import com.example.knowledgeforge.config.AppConfig;
 import com.example.knowledgeforge.domain.backup.dto.RestoreRequest;
 import com.example.knowledgeforge.domain.exception.ValidationException;
+import com.example.knowledgeforge.json.JsonMapper;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
@@ -17,11 +25,9 @@ import java.security.MessageDigest;
 import java.util.Map;
 
 /**
- * Mapowany na /api/admin/backups/*. Sekretny, administracyjny endpoint — CELOWO bez żadnej
- * obsługi w UI, nigdzie na frontendzie nielinkowany. Bezpieczeństwo NIE opiera się wyłącznie
- * na tym, że nikt "nie zna" adresu:
- *   1. backup.restore.enabled musi być jawnie true, inaczej WSZYSTKO tutaj wygląda jak 404
- *      (nieodróżnialne od trasy, która w ogóle nie istnieje),
+ * /api/admin/backups — sekretny, administracyjny endpoint — CELOWO bez żadnej obsługi w UI.
+ * Ma WŁASNE zabezpieczenie, niezależne od JWT (SecurityConfig go przepuszcza):
+ *   1. backup.restore.enabled musi być jawnie true, inaczej WSZYSTKO tutaj wygląda jak 404,
  *   2. tylko żądania z localhosta (127.0.0.1 / ::1) — bez zaufania X-Forwarded-For,
  *   3. nagłówek X-Restore-Secret porównywany stało-czasowo (MessageDigest.isEqual),
  *      pusty skonfigurowany sekret CAŁKOWICIE blokuje endpoint,
@@ -29,7 +35,9 @@ import java.util.Map;
  * Każda odrzucona i każda wykonana próba restore trafia do audytu (BackupAuditLog) —
  * bez sekretu i bez hasła bazy.
  */
-public class AdminBackupServlet extends ApiServlet {
+@RestController
+@RequestMapping("/api/admin/backups")
+public class AdminBackupController {
 
     private static final String CONFIRMATION_PHRASE = "RESTORE KNOWLEDGE-FORGE";
 
@@ -37,79 +45,58 @@ public class AdminBackupServlet extends ApiServlet {
     private final DatabaseBackupService backupService;
     private final DatabaseRestoreService restoreService;
 
-    public AdminBackupServlet(AppConfig config, DatabaseBackupService backupService, DatabaseRestoreService restoreService) {
+    public AdminBackupController(AppConfig config, DatabaseBackupService backupService,
+                                 DatabaseRestoreService restoreService) {
         this.config = config;
         this.backupService = backupService;
         this.restoreService = restoreService;
     }
 
-    @Override
-    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    @GetMapping
+    public ResponseEntity<?> list(HttpServletRequest req) {
         if (!config.backupRestoreEnabled()) {
-            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
-            return;
+            return status(HttpStatus.NOT_FOUND);
         }
         if (!isLocalhost(req)) {
             BackupAuditLog.record(req.getRemoteAddr(), "LIST_BACKUPS", null, "REJECTED_NOT_LOCALHOST");
-            resp.sendError(HttpServletResponse.SC_FORBIDDEN);
-            return;
+            return status(HttpStatus.FORBIDDEN);
         }
         if (!secretMatches(req)) {
             BackupAuditLog.record(req.getRemoteAddr(), "LIST_BACKUPS", null, "REJECTED_BAD_SECRET");
-            resp.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-            return;
+            return status(HttpStatus.UNAUTHORIZED);
         }
-
-        String[] seg = pathSegments(req);
-        if (seg.length == 0) {
-            writeJson(resp, 200, backupService.listBackups());
-        } else {
-            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
-        }
+        return ResponseEntity.ok(backupService.listBackups());
     }
 
-    @Override
-    protected void doPost(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+    @PostMapping("/restore")
+    public ResponseEntity<?> restore(HttpServletRequest req) {
         if (!config.backupRestoreEnabled()) {
-            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
-            return;
+            return status(HttpStatus.NOT_FOUND);
         }
-
-        String[] seg = pathSegments(req);
-        if (seg.length != 1 || !"restore".equals(seg[0])) {
-            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
-            return;
-        }
-
         if (!isLocalhost(req)) {
             BackupAuditLog.record(req.getRemoteAddr(), "RESTORE", null, "REJECTED_NOT_LOCALHOST");
-            resp.sendError(HttpServletResponse.SC_FORBIDDEN);
-            return;
+            return status(HttpStatus.FORBIDDEN);
         }
         if (!secretMatches(req)) {
             BackupAuditLog.record(req.getRemoteAddr(), "RESTORE", null, "REJECTED_BAD_SECRET");
-            resp.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-            return;
+            return status(HttpStatus.UNAUTHORIZED);
         }
 
         RestoreRequest body;
-        try {
-            body = readJson(req, RestoreRequest.class);
-        } catch (RuntimeException e) {
+        try (InputStream in = req.getInputStream()) {
+            body = JsonMapper.get().readValue(in, RestoreRequest.class);
+        } catch (IOException | RuntimeException e) {
             BackupAuditLog.record(req.getRemoteAddr(), "RESTORE", null, "REJECTED_BAD_BODY");
-            writeError(resp, 400, "Malformed request body");
-            return;
+            return error(HttpStatus.BAD_REQUEST, "Malformed request body");
         }
         if (body == null || !CONFIRMATION_PHRASE.equals(body.confirmation())) {
             BackupAuditLog.record(req.getRemoteAddr(), "RESTORE",
                     body != null ? body.backupFile() : null, "REJECTED_BAD_CONFIRMATION");
-            writeError(resp, 400, "Missing or incorrect confirmation phrase");
-            return;
+            return error(HttpStatus.BAD_REQUEST, "Missing or incorrect confirmation phrase");
         }
         if (body.backupFile() == null || body.backupFile().isBlank()) {
             BackupAuditLog.record(req.getRemoteAddr(), "RESTORE", null, "REJECTED_MISSING_FILENAME");
-            writeError(resp, 400, "backupFile is required");
-            return;
+            return error(HttpStatus.BAD_REQUEST, "backupFile is required");
         }
 
         DatabaseRestoreService.RestoreResult result;
@@ -117,19 +104,19 @@ public class AdminBackupServlet extends ApiServlet {
             result = restoreService.restore(body.backupFile());
         } catch (ValidationException e) {
             BackupAuditLog.record(req.getRemoteAddr(), "RESTORE", body.backupFile(), "REJECTED_INVALID_FILE");
-            throw e; // -> 400 przez wspólny handler w ApiServlet
+            throw e; // -> 400 przez GlobalExceptionHandler
         }
 
         BackupAuditLog.record(req.getRemoteAddr(), "RESTORE", body.backupFile(), result.outcome().name());
 
-        switch (result.outcome()) {
-            case SUCCESS -> writeJson(resp, 200,
+        return switch (result.outcome()) {
+            case SUCCESS -> ResponseEntity.ok(
                     Map.of("status", "success", "restartRequired", false, "message", result.message()));
-            case SUCCESS_RESTART_REQUIRED -> writeJson(resp, 200,
+            case SUCCESS_RESTART_REQUIRED -> ResponseEntity.ok(
                     Map.of("status", "success", "restartRequired", true, "message", result.message()));
-            case CONFLICT -> writeError(resp, 409, result.message());
-            case EMERGENCY_BACKUP_FAILED, RESTORE_FAILED -> writeError(resp, 500, result.message());
-        }
+            case CONFLICT -> error(HttpStatus.CONFLICT, result.message());
+            case EMERGENCY_BACKUP_FAILED, RESTORE_FAILED -> error(HttpStatus.INTERNAL_SERVER_ERROR, result.message());
+        };
     }
 
     /** Wyłącznie loopback — świadomie NIE czytamy X-Forwarded-For (aplikacja nie ma skonfigurowanego zaufanego reverse proxy). */
@@ -142,10 +129,19 @@ public class AdminBackupServlet extends ApiServlet {
         return secretMatches(config.backupRestoreSecret(), req.getHeader("X-Restore-Secret"));
     }
 
+    private static ResponseEntity<?> status(HttpStatus status) {
+        return ResponseEntity.status(status).build();
+    }
+
+    private static ResponseEntity<?> error(HttpStatus status, String message) {
+        return ResponseEntity.status(status).contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("message", message == null ? "" : message));
+    }
+
     // ── Czyste funkcje (bez HttpServletRequest) — łatwe do przetestowania jednostkowo ──
 
     /**
-     * Parsuje przez InetAddress zamiast porównywać z sztywną listą stringów — Jetty potrafi
+     * Parsuje przez InetAddress zamiast porównywać z sztywną listą stringów — kontener potrafi
      * zwrócić IPv6 loopback w kilku różnych reprezentacjach ("::1", "0:0:0:0:0:0:0:1", czasem
      * z sufiksem strefy "%0"), a #isLoopbackAddress() poprawnie obejmuje cały zakres 127.0.0.0/8
      * i wszystkie warianty ::1 naraz. getByName() na literale IP nie robi DNS-lookupu.

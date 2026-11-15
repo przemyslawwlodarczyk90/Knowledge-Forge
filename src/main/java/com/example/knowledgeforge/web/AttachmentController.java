@@ -2,9 +2,17 @@ package com.example.knowledgeforge.web;
 
 import com.example.knowledgeforge.domain.attachment.Attachment;
 import com.example.knowledgeforge.domain.attachment.AttachmentType;
+import com.example.knowledgeforge.domain.attachment.dto.AttachmentDto;
 import com.example.knowledgeforge.service.AttachmentService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -17,50 +25,46 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 
+import static com.example.knowledgeforge.web.ApiSupport.clientId;
+import static com.example.knowledgeforge.web.ApiSupport.parseLong;
+
 /**
- * Mapowany na /api/attachments/*. Lista i upload żyją w TopicServlet (zagnieżdżone pod
- * tematem — /api/topics/{id}/attachments), bo to zasób podrzędny w stosunku do tematu;
- * ten serwlet obsługuje operacje po samym id załącznika.
+ * /api/attachments — operacje po samym id załącznika. Lista i upload żyją w TopicController
+ * (zagnieżdżone pod tematem — /api/topics/{id}/attachments).
  *
- * Żaden z endpointów nie przyjmuje ścieżki pliku od klienta — plik jest zawsze
- * odnajdywany na podstawie {id} i rekordu z bazy (AttachmentService.resolveForStreaming),
- * który z kolei przepuszcza relativePath przez AttachmentStorage#resolveExisting
- * (normalize() + sprawdzenie, że ścieżka nie wychodzi poza attachments.storage.path).
+ * Żaden z endpointów nie przyjmuje ścieżki pliku od klienta — plik jest zawsze odnajdywany na
+ * podstawie {id} i rekordu z bazy (AttachmentService.resolveForStreaming), który z kolei
+ * przepuszcza relativePath przez AttachmentStorage#resolveExisting (normalize() + sprawdzenie,
+ * że ścieżka nie wychodzi poza attachments.storage.path). /view i /download są zwykłymi
+ * linkami w przeglądarce (&lt;video src&gt;, &lt;a href&gt;) — uwierzytelniane ciasteczkiem KF_TOKEN.
  */
-public class AttachmentServlet extends ApiServlet {
+@RestController
+@RequestMapping("/api/attachments")
+public class AttachmentController {
 
     private final AttachmentService attachmentService;
 
-    public AttachmentServlet(AttachmentService attachmentService) {
+    public AttachmentController(AttachmentService attachmentService) {
         this.attachmentService = attachmentService;
     }
 
-    @Override
-    protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        String[] seg = pathSegments(req);
-        if (seg.length == 1) {
-            writeJson(resp, 200, attachmentService.getById(parseLong(seg[0])));
-        } else if (seg.length == 2 && "view".equals(seg[1])) {
-            handleView(parseLong(seg[0]), req, resp);
-        } else if (seg.length == 2 && "download".equals(seg[1])) {
-            handleDownload(parseLong(seg[0]), resp);
-        } else {
-            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
-        }
+    @GetMapping("/{id}")
+    public AttachmentDto getById(@PathVariable String id) {
+        return attachmentService.getById(parseLong(id));
     }
 
-    @Override
-    protected void doDelete(HttpServletRequest req, HttpServletResponse resp) throws IOException {
-        String[] seg = pathSegments(req);
-        if (seg.length == 1) {
-            attachmentService.delete(parseLong(seg[0]), clientId(req));
-            resp.setStatus(204);
-        } else {
-            resp.sendError(HttpServletResponse.SC_NOT_FOUND);
-        }
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable String id, HttpServletRequest req) {
+        attachmentService.delete(parseLong(id), clientId(req));
     }
 
     // ── GET /api/attachments/{id}/view — wyłącznie VIDEO, inline, z obsługą Range ──
+
+    @GetMapping("/{id}/view")
+    public void view(@PathVariable String id, HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        handleView(parseLong(id), req, resp);
+    }
 
     private void handleView(Long id, HttpServletRequest req, HttpServletResponse resp) throws IOException {
         AttachmentService.ResolvedFile resolved = attachmentService.resolveForStreaming(id);
@@ -105,6 +109,11 @@ public class AttachmentServlet extends ApiServlet {
     }
 
     // ── GET /api/attachments/{id}/download — dowolny typ, załącznik, cały plik strumieniowo ──
+
+    @GetMapping("/{id}/download")
+    public void download(@PathVariable String id, HttpServletResponse resp) throws IOException {
+        handleDownload(parseLong(id), resp);
+    }
 
     private void handleDownload(Long id, HttpServletResponse resp) throws IOException {
         AttachmentService.ResolvedFile resolved = attachmentService.resolveForStreaming(id);
