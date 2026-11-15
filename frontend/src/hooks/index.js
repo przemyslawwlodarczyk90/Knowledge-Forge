@@ -6,6 +6,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
+export { useResizablePanel } from './useResizablePanel'
+export { useApplicationEvents, useConnectionStatus, useReconnectResync } from './useApplicationEvents'
+
 // ── useApi ────────────────────────────────────────────────────────
 //
 // POPRAWKA:
@@ -70,7 +73,7 @@ export function useDebounce(value, delay = 300) {
 export function useTitle(title) {
   useEffect(() => {
     const prev = document.title
-    document.title = title ? `${title} — Knowledge-Forge` : 'Knowledge-Forge'
+    document.title = title ? `${title} — Knowledge Forge 2.0` : 'Knowledge Forge 2.0'
     return () => { document.title = prev }
   }, [title])
 }

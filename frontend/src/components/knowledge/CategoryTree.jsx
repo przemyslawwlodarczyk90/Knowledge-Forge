@@ -22,21 +22,36 @@ const PlusIcon = () => (
     <path d="M5 1.5v7M1.5 5h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
   </svg>
 )
+const PdfIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+    <path d="M2.5 1.5h4.5L9.5 4.5v6a1 1 0 01-1 1h-6a1 1 0 01-1-1v-8a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+    <path d="M7 1.5v3h2.5" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+  </svg>
+)
 
-const DIFF_COLOR = { BASIC: '#16a34a', MEDIUM: '#d97706', HARD: '#dc2626' }
+const DETAIL_LEVEL_COLOR = { LOW: '#64748b', MEDIUM: '#d97706', HIGH: '#16a34a' }
 
 /* ── Węzeł drzewa ── */
 function TreeNode({
   node, depth = 0,
-  expanded, topics, loadingTopics, selectedTopicId,
+  expanded, topics, loadingTopics, selectedTopicId, showLowLevel,
   onToggle, onSelectTopic, onAddSubcategory, onAddTopic,
+  bulkMode, selectedIds, onToggleSelect,
 }) {
   const [hovered, setHovered] = useState(false)
   const isExpanded  = expanded.has(node.id)
   const nodeTopics  = topics[node.id] ?? []
+  const visibleTopics = showLowLevel ? nodeTopics : nodeTopics.filter(t => t.detailLevel !== 'LOW')
+  const hiddenLowCount = nodeTopics.length - visibleTopics.length
   const isLoading   = loadingTopics.has(node.id)
 
-  const isCategory    = depth === 0   // IT, HISTORIA
+  /* Cyferka przy nazwie kategorii — bezpośrednia liczba tematów (bez podkategorii),
+     pomniejszona o ukryte tematy niskiego poziomu, chyba że checkbox je odsłania. */
+  const totalCount   = node.topicCount ?? 0
+  const lowCount     = node.lowDetailCount ?? 0
+  const visibleCount = showLowLevel ? totalCount : totalCount - lowCount
+
+  const isCategory    = depth === 0   // kategoria główna
   const isSubcategory = depth === 1   // JAVA, SIECI, RENESANS
 
   return (
@@ -60,7 +75,20 @@ function TreeNode({
           {node.name}
         </span>
 
-        {hovered && (
+        {isCategory && (
+          <span
+            className="tn-count"
+            title={
+              visibleCount === totalCount
+                ? 'Liczba tematów w tej kategorii (razem z podkategoriami)'
+                : `Liczba tematów w tej kategorii (razem z podkategoriami) — ${lowCount} niskiego poziomu ukryte`
+            }
+          >
+            {visibleCount}
+          </span>
+        )}
+
+        {hovered && !bulkMode && (
           <div className="tn-actions">
             {isCategory && (
               <button
@@ -108,10 +136,14 @@ function TreeNode({
               topics={topics}
               loadingTopics={loadingTopics}
               selectedTopicId={selectedTopicId}
+              showLowLevel={showLowLevel}
               onToggle={onToggle}
               onSelectTopic={onSelectTopic}
               onAddSubcategory={onAddSubcategory}
               onAddTopic={onAddTopic}
+              bulkMode={bulkMode}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
             />
           ))}
 
@@ -121,24 +153,53 @@ function TreeNode({
               <span className="tn-spinner" /> Ładowanie...
             </div>
           )}
-          {!isLoading && nodeTopics.map(topic => (
-            <button
-              key={topic.id}
-              className={`tn-topic${selectedTopicId === topic.id ? ' tn-topic--active' : ''}`}
-              onClick={() => onSelectTopic(topic)}
-            >
-              <span className="tn-topic-icon"><NoteIcon /></span>
-              <span className="tn-topic-name" title={topic.title}>{topic.title}</span>
-              <span
-                className="tn-topic-diff"
-                title={topic.difficulty}
-                style={{ background: DIFF_COLOR[topic.difficulty] }}
-              />
-            </button>
-          ))}
+          {!isLoading && visibleTopics.map(topic => {
+            const isLow = topic.detailLevel === 'LOW'
+            const hasNote = topic.status === 'NOTE_ADDED'
+            const isSelected = bulkMode && selectedIds.has(topic.id)
+            return (
+              <div key={topic.id} className={`tn-topic-row${bulkMode ? ' tn-topic-row--bulk' : ''}`}>
+                {bulkMode && (
+                  <input
+                    type="checkbox"
+                    className="tn-topic-checkbox"
+                    checked={isSelected}
+                    disabled={!hasNote}
+                    aria-label={hasNote
+                      ? `Zaznacz „${topic.title}” do zbiorczego PDF`
+                      : `„${topic.title}” — brak zapisanej notatki, nie można dodać do zbiorczego PDF`}
+                    title={hasNote ? 'Zaznacz do zbiorczego PDF' : 'Brak zapisanej notatki'}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => onToggleSelect(topic)}
+                  />
+                )}
+                <button
+                  className={`tn-topic${selectedTopicId === topic.id ? ' tn-topic--active' : ''}${isLow ? ' tn-topic--low' : ''}${isSelected ? ' tn-topic--selected' : ''}`}
+                  onClick={() => onSelectTopic(topic)}
+                >
+                  <span className="tn-topic-icon"><NoteIcon /></span>
+                  <span className="tn-topic-name" title={topic.shortPrompt ? `${topic.title} — ${topic.shortPrompt}` : topic.title}>
+                    {isLow && <span className="tn-topic-low-flag" title="Temat do uzupełnienia — niski poziom szczegółowości">!</span>}
+                    {topic.title}
+                    {topic.shortPrompt && <span className="tn-topic-desc"> — {topic.shortPrompt}</span>}
+                  </span>
+                  <span
+                    className="tn-topic-diff"
+                    title={topic.detailLevel}
+                    style={{ background: DETAIL_LEVEL_COLOR[topic.detailLevel] }}
+                  />
+                </button>
+              </div>
+            )
+          })}
           {!isLoading && nodeTopics.length === 0 && (node.children ?? []).length === 0 && (
             <p className="tn-empty-hint">
               {isCategory ? 'Brak podkategorii' : 'Brak tematów'}
+            </p>
+          )}
+          {!isLoading && nodeTopics.length > 0 && visibleTopics.length === 0 && (node.children ?? []).length === 0 && (
+            <p className="tn-empty-hint">
+              Wszystkie tematy ({hiddenLowCount}) mają niski poziom szczegółowości — zaznacz „Pokaż tematy niskiego poziomu”
             </p>
           )}
         </div>
@@ -151,18 +212,58 @@ function TreeNode({
 export default function CategoryTree({
   tree, expanded, topics, loadingTopics, selectedTopicId,
   onToggle, onSelectTopic, onAddRootCategory, onAddSubcategory, onAddTopic,
-  loading,
+  loading, width = 268,
+  bulkMode, onToggleBulkMode, selectedIds, onToggleSelect, onClearSelection, onSelectVisible,
+  onRequestBulkPdf, bulkPdfBusy,
 }) {
+  const [showLowLevel, setShowLowLevel] = useState(false)
+  const selectedCount = selectedIds?.size ?? 0
+
   return (
-    <aside className="tree-panel">
+    <aside className="tree-panel" style={{ width: `${width}px` }}>
 
       {/* Nagłówek */}
       <div className="tree-head">
         <span className="tree-head-title">Baza wiedzy</span>
-        <button className="tree-add-btn" onClick={onAddRootCategory} title="Nowa kategoria (np. IT, HISTORIA)">
+        <button className="tree-add-btn" onClick={onAddRootCategory} title="Nowa kategoria">
           <PlusIcon />
         </button>
       </div>
+
+      {/* Przełącznik trybu druku masowego */}
+      <label className="tree-bulk-toggle" title="Zaznacz kilka tematów i wygeneruj z nich jeden zbiorczy PDF">
+        <input
+          type="checkbox"
+          checked={bulkMode}
+          onChange={e => onToggleBulkMode(e.target.checked)}
+        />
+        <span>Druk masowy</span>
+      </label>
+
+      {/* Pasek akcji trybu masowego — tylko gdy tryb włączony */}
+      {bulkMode && (
+        <div className="tree-bulk-bar">
+          <span className="tree-bulk-count">{selectedCount === 0 ? 'Nic nie wybrano' : `Wybrano: ${selectedCount}`}</span>
+          <div className="tree-bulk-actions">
+            {onSelectVisible && (
+              <button type="button" className="tree-bulk-btn" onClick={onSelectVisible} title="Zaznacz aktualnie widoczne (rozwinięte) tematy z zapisaną notatką">
+                Zaznacz widoczne
+              </button>
+            )}
+            <button type="button" className="tree-bulk-btn" onClick={onClearSelection} disabled={selectedCount === 0}>
+              Wyczyść
+            </button>
+            <button
+              type="button"
+              className="tree-bulk-btn tree-bulk-btn--pdf"
+              onClick={onRequestBulkPdf}
+              disabled={selectedCount === 0 || bulkPdfBusy}
+            >
+              <PdfIcon /> PDF ({selectedCount})
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Legenda głębokości */}
       <div className="tree-legend">
@@ -172,6 +273,16 @@ export default function CategoryTree({
         <span className="tree-legend-sep">›</span>
         <span className="tree-legend-item tree-legend-item--topic">Temat</span>
       </div>
+
+      {/* Checkbox: pokaż tematy niskiego poziomu (tzw. "do uzupełnienia") */}
+      <label className="tree-low-toggle" title="Tematy niskiego poziomu szczegółowości to zwykle notatki-zaślepki, zapisane do późniejszego uzupełnienia">
+        <input
+          type="checkbox"
+          checked={showLowLevel}
+          onChange={e => setShowLowLevel(e.target.checked)}
+        />
+        <span>Pokaż tematy niskiego poziomu</span>
+      </label>
 
       {/* Drzewo */}
       <div className="tree-body">
@@ -183,7 +294,7 @@ export default function CategoryTree({
               <path d="M4 10a2 2 0 012-2h8l2 2h14a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V10z" stroke="currentColor" strokeWidth="1.5"/>
             </svg>
             <p className="tree-empty-title">Brak kategorii</p>
-            <p className="tree-empty-sub">Zacznij od dodania kategorii<br/>np. <em>IT</em> lub <em>HISTORIA</em></p>
+            <p className="tree-empty-sub">Zacznij od dodania pierwszej kategorii</p>
             <button className="tree-empty-btn" onClick={onAddRootCategory}>
               Dodaj kategorię →
             </button>
@@ -198,10 +309,14 @@ export default function CategoryTree({
               topics={topics}
               loadingTopics={loadingTopics}
               selectedTopicId={selectedTopicId}
+              showLowLevel={showLowLevel}
               onToggle={onToggle}
               onSelectTopic={onSelectTopic}
               onAddSubcategory={onAddSubcategory}
               onAddTopic={onAddTopic}
+              bulkMode={bulkMode}
+              selectedIds={selectedIds}
+              onToggleSelect={onToggleSelect}
             />
           ))
         )}
@@ -209,11 +324,12 @@ export default function CategoryTree({
 
       <style>{`
         .tree-panel {
-          width: 268px; flex-shrink: 0;
+          flex-shrink: 0;
           border-right: 1px solid var(--border-1);
           background: var(--bg-2);
           display: flex; flex-direction: column;
           height: 100%;
+          min-width: 0;
         }
 
         /* Nagłówek */
@@ -237,6 +353,39 @@ export default function CategoryTree({
         }
         .tree-add-btn:hover { background: var(--accent-dim); }
 
+        /* Przełącznik "Druk masowy" — tuż pod nagłówkiem, dobrze widoczny */
+        .tree-bulk-toggle {
+          display: flex; align-items: center; gap: 6px;
+          padding: 8px 14px;
+          border-bottom: 1px solid var(--border-1);
+          background: #fff; flex-shrink: 0;
+          font-size: 0.74rem; font-weight: 700; color: var(--text-1);
+          cursor: pointer; user-select: none;
+        }
+        .tree-bulk-toggle input { cursor: pointer; accent-color: var(--accent); width: 13px; height: 13px; }
+        .tree-bulk-toggle:hover { color: var(--accent); }
+
+        /* Pasek akcji trybu masowego */
+        .tree-bulk-bar {
+          display: flex; flex-direction: column; gap: 6px;
+          padding: 9px 14px; background: var(--accent-light);
+          border-bottom: 1px solid var(--border-0); flex-shrink: 0;
+        }
+        .tree-bulk-count { font-size: 0.72rem; font-weight: 700; color: var(--accent); }
+        .tree-bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+        .tree-bulk-btn {
+          padding: 5px 10px; border-radius: var(--radius-md);
+          border: 1px solid var(--border-0); background: #fff;
+          font-size: 0.71rem; font-weight: 700; color: var(--text-2);
+          cursor: pointer; transition: all var(--t-fast);
+          display: inline-flex; align-items: center; gap: 4px;
+        }
+        .tree-bulk-btn:hover:not(:disabled) { background: var(--bg-2); color: var(--text-0); }
+        .tree-bulk-btn:disabled { opacity: .5; cursor: not-allowed; }
+        .tree-bulk-btn--pdf { background: var(--accent); color: #fff; border-color: var(--accent); margin-left: auto; }
+        .tree-bulk-btn--pdf:hover:not(:disabled) { background: var(--accent-dim); }
+        .tree-bulk-btn--pdf:disabled { background: var(--border-1); border-color: var(--border-1); color: var(--text-3); opacity: 1; }
+
         /* Legenda */
         .tree-legend {
           display: flex; align-items: center; gap: 4px;
@@ -253,6 +402,18 @@ export default function CategoryTree({
         .tree-legend-item--sub   { color: var(--text-2); }
         .tree-legend-item--topic { color: var(--text-3); }
         .tree-legend-sep { color: var(--text-3); font-size: 0.65rem; }
+
+        /* Checkbox — pokaż tematy niskiego poziomu */
+        .tree-low-toggle {
+          display: flex; align-items: center; gap: 6px;
+          padding: 7px 14px;
+          border-bottom: 1px solid var(--border-1);
+          background: #fff; flex-shrink: 0;
+          font-size: 0.71rem; font-weight: 600; color: var(--text-2);
+          cursor: pointer; user-select: none;
+        }
+        .tree-low-toggle input { cursor: pointer; accent-color: var(--accent); }
+        .tree-low-toggle:hover { color: var(--text-0); }
 
         /* Ciało */
         .tree-body {
@@ -273,7 +434,7 @@ export default function CategoryTree({
         }
         .tn-row:hover { background: rgba(0,0,0,0.03); }
 
-        /* Depth 0 — Kategoria (IT, HISTORIA) */
+        /* Depth 0 — Kategoria główna */
         .tn-row--d0 {
           padding-left: 10px;
           border-bottom: 1px solid var(--border-2);
@@ -315,6 +476,15 @@ export default function CategoryTree({
         }
         .tn-name:hover { color: var(--accent) !important; }
 
+        /* Cyferka — liczba notatek w kategorii (razem z podkategoriami) */
+        .tn-count {
+          flex-shrink: 0;
+          font-family: var(--font-mono); font-size: 0.68rem; font-weight: 800;
+          color: var(--text-0); background: var(--bg-3, rgba(0,0,0,0.07));
+          border: 1px solid var(--border-1); border-radius: 100px;
+          padding: 1px 7px; min-width: 16px; text-align: center;
+        }
+
         /* Akcje hover */
         .tn-actions {
           display: flex; gap: 3px; flex-shrink: 0;
@@ -340,6 +510,18 @@ export default function CategoryTree({
         /* Dzieci */
         .tn-children { }
 
+        /* Wiersz tematu — checkbox trybu masowego (jeśli jest) + przycisk otwierający notatkę,
+           JAWNIE oddzielone elementy (nie zagnieżdżamy inputa w buttonie), żeby klik na
+           checkboxie nigdy nie otwierał notatki i odwrotnie. */
+        .tn-topic-row { position: relative; }
+        .tn-topic-checkbox {
+          position: absolute; left: 24px; top: 50%; transform: translateY(-50%);
+          width: 13px; height: 13px; z-index: 2;
+          cursor: pointer; accent-color: var(--accent);
+        }
+        .tn-topic-checkbox:disabled { cursor: not-allowed; opacity: .45; }
+        .tn-topic-checkbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
         /* Temat (liść) */
         .tn-topic {
           display: flex; align-items: center; gap: 8px;
@@ -355,11 +537,18 @@ export default function CategoryTree({
           border-left-color: var(--accent);
         }
         .tn-topic--active .tn-topic-name { color: var(--accent); font-weight: 600; }
+        .tn-topic--selected { background: rgba(37,99,235,0.06); }
         .tn-topic-icon { color: var(--text-3); flex-shrink: 0; display: flex; }
         .tn-topic-name {
           flex: 1; font-size: 0.78rem; color: var(--text-1);
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
           transition: color var(--t-fast);
+        }
+        .tn-topic-desc { font-style: italic; color: var(--text-3); font-size: 0.92em; }
+        .tn-topic--low .tn-topic-name { color: var(--text-2); font-style: italic; }
+        .tn-topic-low-flag {
+          display: inline-block; color: #b45309; font-weight: 800;
+          font-style: normal; margin-right: 3px;
         }
         .tn-topic-diff {
           width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;

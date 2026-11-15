@@ -4,7 +4,6 @@ import { toast } from '@/store'
 
 export default function CreateCategoryModal({ parentId, parentName, onClose, onCreated }) {
   const [name, setName]         = useState('')
-  const [desc, setDesc]         = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
 
@@ -14,7 +13,7 @@ export default function CreateCategoryModal({ parentId, parentName, onClose, onC
     setLoading(true)
     setError('')
     try {
-      const res = await categoriesApi.create({ name: name.trim(), description: desc.trim() || null, parentId: parentId ?? null })
+      const res = await categoriesApi.create({ name: name.trim(), parentId: parentId ?? null })
       toast.success(`Kategoria "${res.data.name}" utworzona`)
       onCreated(res.data)
       onClose()
@@ -45,20 +44,10 @@ export default function CreateCategoryModal({ parentId, parentName, onClose, onC
               className="mf-input"
               value={name}
               onChange={e => { setName(e.target.value); setError('') }}
-              placeholder={parentId ? 'np. JAVA, SIECI, RENESANS' : 'np. IT, HISTORIA, MEDYCYNA'}
+              placeholder={parentId ? 'Nazwa podkategorii' : 'Nazwa kategorii'}
               autoFocus
             />
             {error && <span className="mf-error">{error}</span>}
-          </div>
-
-          <div className="mf-field">
-            <label className="mf-label">Opis (opcjonalny)</label>
-            <input
-              className="mf-input"
-              value={desc}
-              onChange={e => setDesc(e.target.value)}
-              placeholder="Krótki opis kategorii"
-            />
           </div>
 
           <footer className="modal-foot">

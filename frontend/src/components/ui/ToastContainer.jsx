@@ -34,7 +34,9 @@ export default function ToastContainer() {
         .toast-container {
           position: fixed; bottom: 24px; right: 24px;
           display: flex; flex-direction: column; gap: 8px;
-          z-index: 9999; max-width: 360px;
+          /* Najwyższa warstwa aplikacji — zob. hierarchię z-index w SlideOverPanel.jsx (główny
+             layout <500, pełnoekranowy panel 1000, modal potwierdzenia 1100, toast 1200). */
+          z-index: 1200; max-width: 360px;
         }
         .toast {
           display: flex; align-items: flex-start; gap: 10px;
