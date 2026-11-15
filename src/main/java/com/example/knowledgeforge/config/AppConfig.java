@@ -97,6 +97,31 @@ public class AppConfig {
         return get("app.admin.password", "Admin123!");
     }
 
+    // ===============================
+    // AI — generowanie notatek przez OpenAI (Spring AI)
+    // ===============================
+
+    /** Pusty = generowanie AI wyłączone (stub zwraca 503 z instrukcją). */
+    public String openAiApiKey() {
+        return get("openai.api-key", "");
+    }
+
+    public String openAiBaseUrl() {
+        return get("openai.base-url", "https://api.openai.com");
+    }
+
+    public String openAiModel() {
+        return get("openai.model", "gpt-4o-mini");
+    }
+
+    public double openAiTemperature() {
+        return Double.parseDouble(get("openai.temperature", "0.4"));
+    }
+
+    public int aiDailyNoteLimit() {
+        return Integer.parseInt(get("ai.daily-note-limit", "20"));
+    }
+
     /** Nazwa dawnego wspólnego konta z wersji bez logowania (wszystkie dane były przypisane do niego). */
     public String legacyDefaultUsername() {
         return get("legacy.default-user.username", "default");

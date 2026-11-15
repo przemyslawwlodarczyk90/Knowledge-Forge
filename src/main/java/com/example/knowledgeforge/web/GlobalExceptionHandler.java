@@ -1,6 +1,9 @@
 package com.example.knowledgeforge.web;
 
+import com.example.knowledgeforge.domain.exception.AiNotConfiguredException;
+import com.example.knowledgeforge.domain.exception.AiResponseException;
 import com.example.knowledgeforge.domain.exception.ConflictException;
+import com.example.knowledgeforge.domain.exception.DailyLimitExceededException;
 import com.example.knowledgeforge.domain.exception.ForbiddenException;
 import com.example.knowledgeforge.domain.exception.NotFoundException;
 import com.example.knowledgeforge.domain.exception.PayloadTooLargeException;
@@ -54,6 +57,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MultipartException.class)
     ResponseEntity<Map<String, String>> badMultipart(MultipartException e) {
         return error(HttpStatus.BAD_REQUEST, "Malformed multipart upload: " + e.getMessage());
+    }
+
+    @ExceptionHandler(DailyLimitExceededException.class)
+    ResponseEntity<Map<String, String>> dailyLimit(DailyLimitExceededException e) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
+    }
+
+    @ExceptionHandler(AiNotConfiguredException.class)
+    ResponseEntity<Map<String, String>> aiNotConfigured(AiNotConfiguredException e) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+    }
+
+    @ExceptionHandler(AiResponseException.class)
+    ResponseEntity<Map<String, String>> aiResponse(AiResponseException e) {
+        return error(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
 
     @ExceptionHandler(ForbiddenException.class)

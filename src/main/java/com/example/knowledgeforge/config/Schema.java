@@ -170,7 +170,20 @@ public final class Schema {
                 created_at TIMESTAMPTZ NOT NULL
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_attachment_topic_id ON attachment(topic_id)"
+            "CREATE INDEX IF NOT EXISTS idx_attachment_topic_id ON attachment(topic_id)",
+
+            // Dzienny licznik generowań AI per użytkownik (zob. ai.AiUsageGuard) — ten sam kształt,
+            // co w poprzedniej wersji projektu; UNIQUE (user_id, usage_date) wymagane przez upsert.
+            """
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                id UUID PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                usage_date DATE NOT NULL,
+                note_generations INT NOT NULL DEFAULT 0,
+                quiz_generations INT NOT NULL DEFAULT 0,
+                UNIQUE (user_id, usage_date)
+            )
+            """
     );
 
     private Schema() {
