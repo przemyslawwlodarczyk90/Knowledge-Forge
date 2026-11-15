@@ -1,0 +1,1 @@
+import{r as o}from"./index-C-L7Re3G.js";function n(e){o.useEffect(()=>{const t=document.title;return document.title=e?`${e} — Knowledge Forge 2.0`:"Knowledge Forge 2.0",()=>{document.title=t}},[e])}export{n as u};
