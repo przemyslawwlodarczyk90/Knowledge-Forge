@@ -19,6 +19,7 @@ frontend/.git/
 .env.local
 .env.*.local
 src/main/resources/config-local.properties
+src/main/resources/application-local.properties
 dependency-reduced-pom.xml
 
 ### Dane użytkownika — pliki notatek na dysku (zob. notes.storage.path) ###
