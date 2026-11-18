@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,5 +158,26 @@ class OpenAiHttpSimulationTest {
 
         NoteGenerationPort note = new AiConfig().noteGenerationPort(config());
         assertThatThrownBy(() -> note.generate("T", null, NoteDifficulty.MEDIUM)).isInstanceOf(AiResponseException.class);
+    }
+
+    @Test
+    void transient_server_errors_are_retried_a_bounded_number_of_times() {
+        AtomicInteger n = new AtomicInteger();
+        responder = body -> n.incrementAndGet() <= 2
+                ? new Reply(500, "{\"error\":{\"message\":\"overloaded\"}}")
+                : completion("{\"questions\":[{\"difficulty\":\"EASY\",\"question\":\"q\",\"code\":\"\","
+                        + "\"options\":[\"a\",\"b\",\"c\",\"d\"],\"correctIndex\":1,\"explanation\":\"e\"}]}");
+        QuizGenerationPort quiz = new AiConfig().quizGenerationPort(config());
+        QuizChunk chunk = new QuizChunk("T", "n", null, QuizDifficulty.EASY, 1, null, List.of(), 0, 1);
+
+        assertThat(quiz.generate(chunk).questions()).hasSize(1);
+        assertThat(calls).hasSize(3);
+
+        calls.clear();
+        responder = body -> new Reply(503, "{\"error\":{\"message\":\"down\"}}");
+        long start = System.nanoTime();
+        assertThatThrownBy(() -> quiz.generate(chunk)).isInstanceOf(AiResponseException.class);
+        assertThat(calls).hasSize(3);
+        assertThat(java.time.Duration.ofNanos(System.nanoTime() - start)).isLessThan(java.time.Duration.ofSeconds(15));
     }
 }
