@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom'
 import ToastContainer from '@/components/ui/ToastContainer'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 
 export default function AuthLayout() {
   return (
@@ -22,6 +23,7 @@ export default function AuthLayout() {
               <span className="auth-logo-f">Forge</span>
             </div>
           </div>
+          <ThemeToggle />
         </header>
 
         {/* Formularz */}
@@ -31,7 +33,7 @@ export default function AuthLayout() {
 
         {/* Stopka */}
         <footer className="auth-footer">
-          © 2025 Knowledge-Forge · Platforma wiedzy
+          © 2026 Knowledge Forge · Platforma wiedzy
         </footer>
       </div>
 
@@ -61,6 +63,9 @@ export default function AuthLayout() {
           width: 100%;
           max-width: 1100px;
           padding: 24px 32px 0;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
         }
         .auth-header-logo {
           display: inline-flex;

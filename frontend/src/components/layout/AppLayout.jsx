@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import ThemeToggle from '@/components/ui/ThemeToggle'
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore, useUIStore } from '@/store'
 import { useResizablePanel } from '@/hooks'
@@ -258,6 +259,7 @@ export default function AppLayout() {
               <h1 className="topbar-title">{pageLabel}</h1>
             </div>
             <div className="topbar-right">
+              <ThemeToggle />
               <span className="topbar-chip">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{marginRight:4}}>
                   <path d="M1.5 2.5h9M1.5 5.5h6M1.5 8.5h7.5M1.5 11.5h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
@@ -311,7 +313,7 @@ export default function AppLayout() {
         .sidebar {
           position:fixed; top:0; left:0; bottom:0;
           width:var(--sb);
-          background:#ffffff;
+          background:var(--bg-1);
           border-right:1px solid var(--border-1);
           display:flex; flex-direction:column;
           transition:width var(--t-slow);
@@ -388,7 +390,7 @@ export default function AppLayout() {
           border:1.5px solid var(--border-1); border-radius:var(--radius-md);
           background:var(--bg-2); transition:border-color var(--t-fast), background var(--t-fast);
         }
-        .sb-search-input-wrap:focus-within { border-color:var(--accent); background:#fff; }
+        .sb-search-input-wrap:focus-within { border-color:var(--accent); background:var(--bg-1); }
         .sb-search-icon { color:var(--text-3); flex-shrink:0; display:flex; }
         .sb-search-input {
           border:none; background:none; outline:none; flex:1; min-width:0;
@@ -398,7 +400,7 @@ export default function AppLayout() {
 
         .sb-search-results {
           position:absolute; top:100%; left:2px; right:-2px; margin-top:4px;
-          background:#fff; border:1px solid var(--border-1); border-radius:var(--radius-md);
+          background:var(--bg-1); border:1px solid var(--border-1); border-radius:var(--radius-md);
           box-shadow:var(--shadow-lg); max-height:360px; overflow-y:auto; z-index:150;
         }
         .sb-search-status { padding:12px 12px; font-size:0.76rem; color:var(--text-3); }
@@ -425,7 +427,7 @@ export default function AppLayout() {
           height:56px; flex-shrink:0;
           display:flex; align-items:center; justify-content:space-between;
           padding:0 28px;
-          background:#ffffff;
+          background:var(--bg-1);
           border-bottom:1px solid var(--border-1);
           position:sticky; top:0; z-index:50;
           box-shadow:var(--shadow-xs);
