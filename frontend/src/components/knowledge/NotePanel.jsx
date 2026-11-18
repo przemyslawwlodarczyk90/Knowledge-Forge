@@ -135,7 +135,7 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
   const [noteLoading, setNoteLoading] = useState(false)
   const [mode, setMode]               = useState('view') // 'view' | 'edit'
   const [pendingAction, setPendingAction] = useState(null) // null | 'edit' | 'save'
-  const [generationTopicId, setGenerationTopicId] = useState(null)
+  const [generation, setGeneration] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [detailLevel, setDetailLevel] = useState(topic?.detailLevel ?? 'MEDIUM')
   const [savingLevel, setSavingLevel] = useState(false)
@@ -260,7 +260,7 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
   useEffect(() => { editor?.setEditable(mode === 'edit') }, [mode, editor])
 
   useEffect(() => {
-    setGenerationTopicId(null)
+    setGeneration(null)
     if (!topic || !editor) { setNote(null); return }
     const topicId = topic.id
     console.debug(LOG, 'loading note for topic', topicId)
@@ -461,6 +461,26 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
   }
 
   const requestEdit = () => setPendingAction('edit')
+
+  function openGeneration(refine) {
+    const source = editor.state.doc
+    const currentNote = refine ? editor.getText({ blockSeparator: '\n\n' }).trim() : null
+    if (refine && !currentNote) {
+      toast.error('Dodaj treść, którą AI ma dopracować.')
+      return
+    }
+    if (currentNote?.length > 60_000) {
+      toast.error('Do dopracowania można wysłać do 60 000 znaków.')
+      return
+    }
+    const images = []
+    if (refine) {
+      source.descendants(node => {
+        if (node.type.name === 'image') images.push(node.toJSON())
+      })
+    }
+    setGeneration({ topicId: topic.id, source, currentNote, images })
+  }
 
   const confirmEdit = () => {
     console.debug(LOG, 'edit confirmed, entering edit mode')
@@ -746,8 +766,14 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
           <div className="act-spacer" />
           {mode === 'view' && (
             <button type="button" className="act-btn act-btn--edit" disabled={!editor || noteLoading}
-              onClick={() => setGenerationTopicId(topic.id)}>
+              onClick={() => openGeneration(false)}>
               Generuj z AI
+            </button>
+          )}
+          {(note || mode === 'edit') && (
+            <button type="button" className="act-btn act-btn--edit" disabled={!editor || noteLoading}
+              onClick={() => openGeneration(true)}>
+              Dopracuj z AI
             </button>
           )}
           {note && (
@@ -782,14 +808,22 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
         </div>
       </div>
 
-      {generationTopicId === topic.id && mode === 'view' && (
+      {generation?.topicId === topic.id && (
         <GenerateNoteModal
           topic={topic}
           replacesNote={Boolean(note)}
-          onClose={() => setGenerationTopicId(null)}
+          currentNote={generation.currentNote}
+          preservesImages={generation.images.length > 0}
+          onClose={() => setGeneration(null)}
           onGenerated={content => {
-            editor.commands.setContent(content, false, {}, { errorOnInvalidContent: true })
-            setGenerationTopicId(null)
+            if (!editor.state.doc.eq(generation.source)) {
+              toast.error('Treść zmieniła się podczas generowania. Ponów próbę na aktualnej wersji.')
+              setGeneration(null)
+              return
+            }
+            const draft = { ...content, content: [...(content.content ?? []), ...generation.images] }
+            editor.commands.setContent(draft, false, {}, { errorOnInvalidContent: true })
+            setGeneration(null)
             setMode('edit')
           }}
         />

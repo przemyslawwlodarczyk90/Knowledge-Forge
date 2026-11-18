@@ -4,10 +4,11 @@ import { notesApi } from '@/api/services'
 
 const DEFAULT_DIFFICULTY = { LOW: 'BASIC', MEDIUM: 'MEDIUM', HIGH: 'HARD' }
 
-export default function GenerateNoteModal({ topic, replacesNote, onClose, onGenerated }) {
+export default function GenerateNoteModal({ topic, replacesNote, currentNote, preservesImages, onClose, onGenerated }) {
   const dialog = useRef(null)
   const request = useRef(null)
-  const [instruction, setInstruction] = useState(topic.shortPrompt?.slice(0, 1000) ?? '')
+  const refining = currentNote != null
+  const [instruction, setInstruction] = useState(refining ? '' : topic.shortPrompt?.slice(0, 1000) ?? '')
   const [difficulty, setDifficulty] = useState(DEFAULT_DIFFICULTY[topic.detailLevel] ?? 'MEDIUM')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -28,13 +29,16 @@ export default function GenerateNoteModal({ topic, replacesNote, onClose, onGene
 
   async function generate(event) {
     event.preventDefault()
-    if (request.current) return
+    const guidance = instruction.trim()
+    if (request.current || (refining && !guidance)) return
     const controller = new AbortController()
     request.current = controller
     setLoading(true)
     setError('')
     try {
-      const { data } = await notesApi.generate(topic.id, { instruction: instruction.trim(), difficulty }, controller.signal)
+      const payload = { instruction: guidance, difficulty }
+      if (refining) payload.currentNote = currentNote
+      const { data } = await notesApi.generate(topic.id, payload, controller.signal)
       if (controller.signal.aborted) return
       if (data?.contentJson?.type !== 'doc') throw new Error('Invalid generated document')
       onGenerated(data.contentJson)
@@ -53,25 +57,33 @@ export default function GenerateNoteModal({ topic, replacesNote, onClose, onGene
     <dialog ref={dialog} className="ai-note-dialog" aria-labelledby="ai-note-title"
       onCancel={event => { event.preventDefault(); cancel() }}>
       <form onSubmit={generate}>
-        <h2 id="ai-note-title">Wygeneruj notatkę z AI</h2>
+        <h2 id="ai-note-title">{refining ? 'Dopracuj notatkę z AI' : 'Wygeneruj notatkę z AI'}</h2>
         <p>{topic.title}</p>
-        <label htmlFor="ai-note-instruction">Wytyczne dla AI (opcjonalnie)</label>
+        <label htmlFor="ai-note-instruction">{refining ? 'Co zmienić w notatce?' : 'Wytyczne dla AI (opcjonalnie)'}</label>
         <textarea id="ai-note-instruction" value={instruction} onChange={event => setInstruction(event.target.value)}
-          maxLength={1000} rows={4} disabled={loading} autoFocus />
-        <small>Puste pole użyje opisu tematu, jeśli został dodany.</small>
-        <label htmlFor="ai-note-difficulty">Poziom szczegółowości szkicu</label>
-        <select id="ai-note-difficulty" value={difficulty} onChange={event => setDifficulty(event.target.value)}
-          disabled={loading}>
-          <option value="BASIC">Podstawowy</option>
-          <option value="MEDIUM">Średniozaawansowany</option>
-          <option value="HARD">Zaawansowany</option>
-        </select>
+          placeholder={refining ? 'Opisz własnymi słowami, co zmienić' : undefined}
+          maxLength={1000} rows={4} disabled={loading} required={refining} autoFocus />
+        {refining
+          ? <small>OpenAI otrzyma bieżący tekst notatki i Twoje wytyczne.</small>
+          : <small>Puste pole użyje opisu tematu, jeśli został dodany.</small>}
+        {!refining && <>
+          <label htmlFor="ai-note-difficulty">Poziom szczegółowości szkicu</label>
+          <select id="ai-note-difficulty" value={difficulty} onChange={event => setDifficulty(event.target.value)}
+            disabled={loading}>
+            <option value="BASIC">Podstawowy</option>
+            <option value="MEDIUM">Średniozaawansowany</option>
+            <option value="HARD">Zaawansowany</option>
+          </select>
+        </>}
         {replacesNote && <p>Zapisanie szkicu zastąpi bieżącą treść notatki.</p>}
+        {preservesImages && <p>Wklejone obrazy znajdą się na końcu szkicu.</p>}
         {error && <p role="alert">{error}</p>}
         {loading && <p role="status">OpenAI przygotowuje szkic…</p>}
         <footer>
           <button type="button" className="act-btn act-btn--cancel" onClick={cancel}>Anuluj</button>
-          <button type="submit" className="act-btn act-btn--save" disabled={loading}>Wygeneruj szkic</button>
+          <button type="submit" className="act-btn act-btn--save" disabled={loading || (refining && !instruction.trim())}>
+            {refining ? 'Dopracuj szkic' : 'Wygeneruj szkic'}
+          </button>
         </footer>
       </form>
       <style>{`

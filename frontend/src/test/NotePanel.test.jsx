@@ -150,6 +150,36 @@ describe('NotePanel — generowanie z AI', () => {
     await user.click(screen.getByRole('button', { name: 'Anuluj' }))
     await screen.findByText('Treść notatki')
   })
+
+  it('dopracowuje bieżący szkic bez zapisywania go ani przesyłania obrazów', async () => {
+    const original = makeNote()
+    original.contentJson.content.push({ type: 'image', attrs: { src: '/api/test.png', alt: 'Obraz notatki' } })
+    getByTopicMock.mockResolvedValue({ data: original })
+    const revised = makeNote()
+    revised.contentJson.content[0].content[0].text = 'Dopracowana notatka'
+    generateMock.mockResolvedValue({ data: revised })
+    const user = userEvent.setup()
+    const { container } = renderPanel(makeTopic())
+    await screen.findByText('Treść notatki')
+
+    await user.click(screen.getByRole('button', { name: 'Edytuj' }))
+    await confirmModal(user)
+    const editor = container.querySelector('.tiptap').editor
+    act(() => editor.commands.insertContentAt(editor.state.doc.firstChild.nodeSize - 1, ' Dopisek'))
+    await user.click(screen.getByRole('button', { name: 'Dopracuj z AI' }))
+    const modal = within(screen.getByRole('dialog', { name: 'Dopracuj notatkę z AI' }))
+    const submit = modal.getByRole('button', { name: 'Dopracuj szkic' })
+    expect(submit).toBeDisabled()
+    await user.type(modal.getByLabelText('Co zmienić w notatce?'), 'Dodaj diagram')
+    await user.click(submit)
+
+    await screen.findByText('Dopracowana notatka')
+    expect(generateMock).toHaveBeenCalledWith('t1', {
+      instruction: 'Dodaj diagram', difficulty: 'MEDIUM', currentNote: 'Treść notatki Dopisek',
+    }, expect.any(AbortSignal))
+    expect(screen.getByRole('img', { name: 'Obraz notatki' })).toBeInTheDocument()
+    expect(saveMock).not.toHaveBeenCalled()
+  })
 })
 
 afterEach(() => {
