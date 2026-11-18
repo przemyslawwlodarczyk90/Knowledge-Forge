@@ -32,6 +32,13 @@
   --red-light:   #fef2f2;
   --yellow:      #d97706;
   --yellow-light:#fffbeb;
+  --yellow-strong:#92400e;
+  --red-soft:    #fee2e2;
+  --green-soft:  #dcfce7;
+  --violet:      #7c3aed;
+  --violet-light:#f5f3ff;
+  --violet-border: rgba(124, 58, 237, 0.25);
+  --hover:       rgba(0, 0, 0, 0.03);
 
   /* ── Tekst — ciemny na jasnym ── */
   --text-0: #0f172a;
@@ -69,6 +76,68 @@
   --shadow-lg:     0 8px 24px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06);
   --shadow-accent: 0 4px 16px rgba(37, 99, 235, 0.30);
   --shadow-cyan:   0 4px 16px rgba(14, 165, 233, 0.25);
+
+  color-scheme: light;
+}
+
+/* ── Tryb ciemny ──
+   Ustawiany przez data-theme="dark" na <html> (zob. theme.js — wybór użytkownika albo
+   ustawienie systemu). Nadpisuje WYŁĄCZNIE tokeny — komponenty korzystają z var(--…),
+   więc nie mają osobnych reguł dla ciemnego motywu. */
+:root[data-theme="dark"] {
+  --bg-0: #0b1120;
+  --bg-1: #111a2c;
+  --bg-2: #16213a;
+  --bg-3: #1e2b45;
+  --bg-4: #2c3b5a;
+
+  --accent:             #4f8cff;
+  --accent-dim:         #3b76f0;
+  --accent-light:       rgba(79, 140, 255, 0.14);
+  --accent-glow:        rgba(79, 140, 255, 0.16);
+  --accent-glow-strong: rgba(79, 140, 255, 0.26);
+
+  --cyan:       #38bdf8;
+  --cyan-dim:   #0ea5e9;
+  --cyan-light: rgba(56, 189, 248, 0.12);
+  --cyan-glow:  rgba(56, 189, 248, 0.16);
+
+  --green:        #34d399;
+  --green-light:  rgba(52, 211, 153, 0.12);
+  --green-soft:   rgba(52, 211, 153, 0.20);
+  --red:          #f87171;
+  --red-light:    rgba(248, 113, 113, 0.12);
+  --red-soft:     rgba(248, 113, 113, 0.20);
+  --yellow:       #fbbf24;
+  --yellow-light: rgba(251, 191, 36, 0.12);
+  --yellow-strong:#fcd34d;
+  --violet:       #a78bfa;
+  --violet-light: rgba(167, 139, 250, 0.13);
+  --violet-border: rgba(167, 139, 250, 0.32);
+  --hover:        rgba(255, 255, 255, 0.04);
+
+  --text-0: #e6edf8;
+  --text-1: #c3cee0;
+  --text-2: #8d9bb4;
+  --text-3: #5f6e88;
+
+  --border-0: rgba(79, 140, 255, 0.38);
+  --border-1: rgba(255, 255, 255, 0.09);
+  --border-2: rgba(255, 255, 255, 0.05);
+
+  --shadow-xs:     0 1px 2px rgba(0,0,0,0.4);
+  --shadow-sm:     0 1px 4px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md:     0 4px 14px rgba(0,0,0,0.5), 0 1px 3px rgba(0,0,0,0.35);
+  --shadow-lg:     0 12px 32px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4);
+  --shadow-accent: 0 4px 18px rgba(79, 140, 255, 0.35);
+  --shadow-cyan:   0 4px 18px rgba(56, 189, 248, 0.3);
+
+  color-scheme: dark;
+}
+
+/* Płynna zmiana motywu — tylko na czas przełączenia (klasa nadawana przez theme.js). */
+html.theme-switching, html.theme-switching * {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease !important;
 }
 
 html, body, #root {
