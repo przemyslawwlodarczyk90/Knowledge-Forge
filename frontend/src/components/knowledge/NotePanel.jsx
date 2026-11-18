@@ -17,6 +17,7 @@ import {
   setCachedNoteMissing,
 } from '@/cache/noteCache'
 import ConfirmModal from './modals/ConfirmModal'
+import GenerateNoteModal from './modals/GenerateNoteModal'
 import AttachmentsSection from './AttachmentsSection'
 import ResizeHandle from '@/components/layout/ResizeHandle'
 
@@ -134,6 +135,7 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
   const [noteLoading, setNoteLoading] = useState(false)
   const [mode, setMode]               = useState('view') // 'view' | 'edit'
   const [pendingAction, setPendingAction] = useState(null) // null | 'edit' | 'save'
+  const [generationTopicId, setGenerationTopicId] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const [detailLevel, setDetailLevel] = useState(topic?.detailLevel ?? 'MEDIUM')
   const [savingLevel, setSavingLevel] = useState(false)
@@ -258,6 +260,7 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
   useEffect(() => { editor?.setEditable(mode === 'edit') }, [mode, editor])
 
   useEffect(() => {
+    setGenerationTopicId(null)
     if (!topic || !editor) { setNote(null); return }
     const topicId = topic.id
     console.debug(LOG, 'loading note for topic', topicId)
@@ -741,6 +744,12 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
         {/* ── Pasek akcji ── */}
         <div className="note-actions">
           <div className="act-spacer" />
+          {mode === 'view' && (
+            <button type="button" className="act-btn act-btn--edit" disabled={!editor || noteLoading}
+              onClick={() => setGenerationTopicId(topic.id)}>
+              Generuj z AI
+            </button>
+          )}
           {note && (
             <button className="act-btn act-btn--pdf" onClick={handleDownloadPdf} disabled={downloadingPdf}>
               {downloadingPdf ? <span className="btn-spin" /> : (
@@ -773,6 +782,18 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
         </div>
       </div>
 
+      {generationTopicId === topic.id && mode === 'view' && (
+        <GenerateNoteModal
+          topic={topic}
+          replacesNote={Boolean(note)}
+          onClose={() => setGenerationTopicId(null)}
+          onGenerated={content => {
+            editor.commands.setContent(content, false, {}, { errorOnInvalidContent: true })
+            setGenerationTopicId(null)
+            setMode('edit')
+          }}
+        />
+      )}
       {pendingAction === 'edit' && (
         <ConfirmModal
           title="Edytować tę notatkę?"

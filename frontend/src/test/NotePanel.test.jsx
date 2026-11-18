@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, waitFor, act, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { clearNoteCache, getNoteCacheSize } from '../cache/noteCache'
 
@@ -30,11 +30,13 @@ vi.mock('@/ws/clientId', () => ({ getClientId: () => 'this-client' }))
 // ── Mock API — controllable via getByTopicMock / saveMock ───────────────────────────────────
 const getByTopicMock = vi.fn()
 const saveMock = vi.fn()
+const generateMock = vi.fn()
 
 vi.mock('@/api/services', () => ({
   notesApi: {
     getByTopic: (...args) => getByTopicMock(...args),
     save: (...args) => saveMock(...args),
+    generate: (...args) => generateMock(...args),
   },
   topicsApi: {
     update: vi.fn(() => Promise.resolve({ data: {} })),
@@ -111,6 +113,43 @@ beforeEach(() => {
   wsMock.status = 'connected'
   getByTopicMock.mockReset()
   saveMock.mockReset()
+  generateMock.mockReset()
+})
+
+describe('NotePanel — generowanie z AI', () => {
+  beforeEach(() => {
+    HTMLDialogElement.prototype.showModal ??= function () { this.open = true }
+    HTMLDialogElement.prototype.close ??= function () { this.open = false }
+  })
+
+  it('przekazuje wytyczne i otwiera szkic do edycji, a anulowanie przywraca zapisaną treść', async () => {
+    getByTopicMock.mockResolvedValue({ data: makeNote() })
+    generateMock.mockResolvedValue({ data: {
+      contentJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Szkic z AI' }] }] },
+    } })
+    const user = userEvent.setup()
+    renderPanel(makeTopic({ shortPrompt: 'Opis tematu', detailLevel: 'HIGH' }))
+    await screen.findByText('Treść notatki')
+
+    await user.click(screen.getByRole('button', { name: 'Generuj z AI' }))
+    const modal = within(screen.getByRole('dialog', { name: 'Wygeneruj notatkę z AI' }))
+    const instruction = modal.getByLabelText('Wytyczne dla AI (opcjonalnie)')
+    const difficulty = modal.getByLabelText('Poziom szczegółowości szkicu')
+    expect(instruction.value).toBe('Opis tematu')
+    expect(difficulty.value).toBe('HARD')
+    await user.clear(instruction)
+    await user.type(instruction, 'Dodaj przykłady')
+    await user.selectOptions(difficulty, 'BASIC')
+    await user.click(modal.getByRole('button', { name: 'Wygeneruj szkic' }))
+
+    await screen.findByText('Szkic z AI')
+    expect(generateMock).toHaveBeenCalledWith('t1', {
+      instruction: 'Dodaj przykłady', difficulty: 'BASIC',
+    }, expect.any(AbortSignal))
+    expect(saveMock).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Anuluj' }))
+    await screen.findByText('Treść notatki')
+  })
 })
 
 afterEach(() => {

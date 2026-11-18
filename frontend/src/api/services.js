@@ -51,6 +51,8 @@ export const notesApi = {
   // anulować pobieranie w toku (zob. DashboardPage / pdfGenerator).
   getByTopic: (topicId, config) => api.get(`/topics/${topicId}/note`, config),
   save:       (topicId, d)      => api.put(`/topics/${topicId}/note`, d),
+  generate:   (topicId, data, signal) =>
+    api.post(`/topics/${topicId}/note/generate`, data, { signal, timeout: 120_000 }),
 }
 
 // ── Konfiguracja widoczna dla frontendu ──────────────────────────────
