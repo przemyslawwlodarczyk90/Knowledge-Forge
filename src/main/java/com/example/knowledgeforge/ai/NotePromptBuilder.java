@@ -137,8 +137,9 @@ public final class NotePromptBuilder {
                 # DOPRACOWANIE NOTATKI
                 Przygotuj pełną zaktualizowaną notatkę na podstawie tekstu poniżej i wytycznych użytkownika.
                 Zachowaj poprawne informacje i przykłady, których wskazówki nie każą zmieniać.
-                Jeśli użytkownik prosi o diagram, umieść czytelny, wielowierszowy diagram tekstowy
-                (np. ASCII ze strzałkami) w polu content odpowiedniego przykładu. Zachowaj wcięcia.
+                Jeśli wytyczne określają zakres lub głębokość zmian, zastosuj je do wskazanych fragmentów.
+                Treści wielowierszowe, np. kod lub diagram tekstowy, umieść w polu content odpowiedniego
+                przykładu i zachowaj ich wcięcia.
 
                 <<<CURRENT_NOTE_START>>>
                 """ + currentNote.replace("<<<CURRENT_NOTE_START>>>", "")
