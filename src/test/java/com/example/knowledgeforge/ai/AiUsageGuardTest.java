@@ -27,6 +27,7 @@ class AiUsageGuardTest {
     static AiUsageGuard guard(int limit, Clock clock) {
         Properties p = new Properties();
         p.setProperty("ai.daily-note-limit", String.valueOf(limit));
+        p.setProperty("ai.daily-quiz-limit", String.valueOf(limit));
         return new AiUsageGuard(TestJpa.get(JdbcTemplate.class), AppConfig.fromProperties(p), clock);
     }
 
@@ -66,5 +67,17 @@ class AiUsageGuardTest {
         for (Future<?> f : fs) f.get();
         pool.shutdown();
         assertThat(ok.get()).isEqualTo(5);
+    }
+
+    @Test
+    void quiz_counter_is_separate_from_note_counter() {
+        long user = randomUserId();
+        Clock day = Clock.fixed(Instant.parse("2030-02-01T10:00:00Z"), ZoneOffset.UTC);
+        AiUsageGuard g = guard(1, day);
+        assertThat(g.checkAndIncrementNote(user)).isEqualTo(1);
+        assertThat(g.checkAndIncrementQuiz(user)).isEqualTo(1);
+        assertThatThrownBy(() -> g.checkAndIncrementQuiz(user))
+                .isInstanceOf(DailyLimitExceededException.class).hasMessageContaining("quiz");
+        assertThatThrownBy(() -> g.checkAndIncrementNote(user)).isInstanceOf(DailyLimitExceededException.class);
     }
 }
