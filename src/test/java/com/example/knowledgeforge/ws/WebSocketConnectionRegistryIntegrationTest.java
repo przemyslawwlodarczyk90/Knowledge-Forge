@@ -84,8 +84,10 @@ class WebSocketConnectionRegistryIntegrationTest {
         Config.holder = registry;
         ctx = new SpringApplicationBuilder(Config.class)
                 .web(WebApplicationType.SERVLET)
-                .properties("server.port=0", "spring.main.banner-mode=off")
-                .run();
+                .properties("spring.main.banner-mode=off")
+                // Argument, nie .properties(): domyślne właściwości przegrywają z SERVER_PORT z .env,
+                // a wtedy test zależał od tego, czy port 8081 jest akurat wolny.
+                .run("--server.port=0");
         port = ((WebServerApplicationContext) ctx).getWebServer().getPort();
         client = HttpClient.newHttpClient();
     }
