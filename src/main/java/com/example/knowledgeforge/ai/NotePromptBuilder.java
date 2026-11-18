@@ -130,24 +130,6 @@ public final class NotePromptBuilder {
         );
     }
 
-    public static String refinementPrompt(String topicTitle, String userInstruction, NoteDifficulty difficulty,
-                                          String currentNote) {
-        return userPrompt(topicTitle, userInstruction, difficulty) + """
-
-                # DOPRACOWANIE NOTATKI
-                Przygotuj pełną zaktualizowaną notatkę na podstawie tekstu poniżej i wytycznych użytkownika.
-                Zachowaj poprawne informacje i przykłady, których wskazówki nie każą zmieniać.
-                Jeśli wytyczne określają zakres lub głębokość zmian, zastosuj je do wskazanych fragmentów.
-                Treści wielowierszowe, np. kod lub diagram tekstowy, umieść w polu content odpowiedniego
-                przykładu i zachowaj ich wcięcia.
-
-                <<<CURRENT_NOTE_START>>>
-                """ + currentNote.replace("<<<CURRENT_NOTE_START>>>", "")
-                        .replace("<<<CURRENT_NOTE_END>>>", "")
-                        .replace("<<<USER_INSTRUCTION_START>>>", "")
-                        .replace("<<<USER_INSTRUCTION_END>>>", "") + "\n<<<CURRENT_NOTE_END>>>";
-    }
-
     private static String difficultyGuidance(NoteDifficulty d) {
         return switch (d) {
             case BASIC -> """

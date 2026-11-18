@@ -53,6 +53,7 @@ class NoteGenerationIT extends IntegrationTestBase {
                 .andExpect(jsonPath("$.contentJson.type").value("doc"))
                 .andExpect(jsonPath("$.difficulty").value("MEDIUM"))
                 .andExpect(jsonPath("$.model").value("gpt-test"))
+                .andExpect(jsonPath("$.promptVersion").value("note-v1"))
                 .andExpect(jsonPath("$.usedToday").value(1))
                 .andExpect(jsonPath("$.dailyLimit").value(3));
         verify(port).generate(eq("Rekurencja"), eq("opis Rekurencja"), eq(NoteDifficulty.MEDIUM));
@@ -73,16 +74,17 @@ class NoteGenerationIT extends IntegrationTestBase {
         String path = "/api/topics/" + id + "/note";
         String currentNote = "Funkcja wywołuje samą siebie.";
         String instruction = "Rozwiń warunek stopu i dodaj diagram.";
-        when(port.refine("Rekurencja", instruction, NoteDifficulty.MEDIUM, currentNote)).thenReturn(sample());
+        when(port.refine("Rekurencja", instruction, currentNote)).thenReturn(sample());
 
-        mvc.perform(withJson(as(user, post(path + "/generate")), Map.of("currentNote", currentNote)))
+        mvc.perform(withJson(as(user, post(path + "/refine")), Map.of("currentNote", currentNote)))
                 .andExpect(status().isBadRequest());
-        mvc.perform(withJson(as(user, post(path + "/generate")),
+        mvc.perform(withJson(as(user, post(path + "/refine")),
                         Map.of("currentNote", currentNote, "instruction", instruction)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.contentJson.type").value("doc"))
+                .andExpect(jsonPath("$.promptVersion").value("note-refine-v1"))
                 .andExpect(jsonPath("$.usedToday").value(1));
-        verify(port).refine("Rekurencja", instruction, NoteDifficulty.MEDIUM, currentNote);
+        verify(port).refine("Rekurencja", instruction, currentNote);
         mvc.perform(as(user, get(path))).andExpect(status().isNotFound());
     }
 

@@ -7,13 +7,17 @@ public class NoOpNoteGenerationService implements NoteGenerationPort {
 
     @Override
     public NoteContent generate(String topicTitle, String userInstruction, NoteDifficulty difficulty) {
-        throw new AiNotConfiguredException(
-                "AI nie jest skonfigurowane — wpisz klucz OpenAI w pliku .env (OPENAI_API_KEY=...) i zrestartuj aplikację.");
+        throw notConfigured();
     }
 
     @Override
-    public NoteContent refine(String topicTitle, String userInstruction, NoteDifficulty difficulty, String currentNote) {
-        return generate(topicTitle, userInstruction, difficulty);
+    public NoteContent refine(String topicTitle, String userInstruction, String currentNote) {
+        throw notConfigured();
+    }
+
+    private static AiNotConfiguredException notConfigured() {
+        return new AiNotConfiguredException(
+                "AI nie jest skonfigurowane — wpisz klucz OpenAI w pliku .env (OPENAI_API_KEY=...) i zrestartuj aplikację.");
     }
 
     @Override

@@ -2,9 +2,9 @@ package com.example.knowledgeforge.ai;
 
 import com.example.knowledgeforge.ai.dto.GenerateNoteRequest;
 import com.example.knowledgeforge.ai.dto.GeneratedNoteDto;
+import com.example.knowledgeforge.ai.dto.RefineNoteRequest;
 import com.example.knowledgeforge.config.AppConfig;
 import com.example.knowledgeforge.domain.exception.TopicNotFoundException;
-import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.service.CurrentUser;
@@ -37,13 +37,7 @@ public class NoteGenerationService {
 
     public GeneratedNoteDto generate(UUID topicId, GenerateNoteRequest req) {
         Long userId = currentUser.id();
-        Topic topic = topicRepository.findByIdAndUserId(topicId, userId)
-                .orElseThrow(() -> new TopicNotFoundException(topicId.toString()));
-
-        boolean refining = req != null && req.currentNote() != null;
-        if (refining && (req.currentNote().isBlank() || req.instruction() == null || req.instruction().isBlank())) {
-            throw new ValidationException("Do dopracowania podaj treść notatki i opisz, co zmienić.");
-        }
+        Topic topic = ownedTopic(topicId, userId);
 
         String instruction = req != null && req.instruction() != null && !req.instruction().isBlank()
                 ? req.instruction() : topic.getShortPrompt();
@@ -51,12 +45,28 @@ public class NoteGenerationService {
                 ? req.difficulty() : NoteDifficulty.fromDetailLevel(topic.getDetailLevel());
 
         int usedToday = usageGuard.checkAndIncrementNote(userId);
-        NoteContent content = refining
-                ? generationPort.refine(topic.getTitle(), instruction, difficulty, req.currentNote())
-                : generationPort.generate(topic.getTitle(), instruction, difficulty);
+        NoteContent content = generationPort.generate(topic.getTitle(), instruction, difficulty);
+        return draft(topicId, content, difficulty, NotePromptBuilder.PROMPT_VERSION, usedToday);
+    }
 
+    public GeneratedNoteDto refine(UUID topicId, RefineNoteRequest req) {
+        Long userId = currentUser.id();
+        Topic topic = ownedTopic(topicId, userId);
+        int usedToday = usageGuard.checkAndIncrementNote(userId);
+        NoteContent content = generationPort.refine(topic.getTitle(), req.instruction(), req.currentNote());
+        return draft(topicId, content, NoteDifficulty.fromDetailLevel(topic.getDetailLevel()),
+                NoteRefinementPrompt.VERSION, usedToday);
+    }
+
+    private Topic ownedTopic(UUID topicId, Long userId) {
+        return topicRepository.findByIdAndUserId(topicId, userId)
+                .orElseThrow(() -> new TopicNotFoundException(topicId.toString()));
+    }
+
+    private GeneratedNoteDto draft(UUID topicId, NoteContent content, NoteDifficulty difficulty,
+                                  String promptVersion, int usedToday) {
         return new GeneratedNoteDto(topicId, content.getTitle(), NoteContentDocumentMapper.toDocument(content),
-                difficulty, generationPort.modelName(), NotePromptBuilder.PROMPT_VERSION, usedToday,
+                difficulty, generationPort.modelName(), promptVersion, usedToday,
                 config.aiDailyNoteLimit());
     }
 }

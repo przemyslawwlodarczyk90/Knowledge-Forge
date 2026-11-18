@@ -10,7 +10,7 @@ public interface NoteGenerationPort {
      */
     NoteContent generate(String topicTitle, String userInstruction, NoteDifficulty difficulty);
 
-    NoteContent refine(String topicTitle, String userInstruction, NoteDifficulty difficulty, String currentNote);
+    NoteContent refine(String topicTitle, String userInstruction, String currentNote);
 
     /** Nazwa modelu (do informacji w odpowiedzi API). */
     String modelName();
