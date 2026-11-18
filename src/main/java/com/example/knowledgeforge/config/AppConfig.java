@@ -122,6 +122,21 @@ public class AppConfig {
         return Integer.parseInt(get("ai.daily-note-limit", "20"));
     }
 
+    /** Ile razy dziennie użytkownik może kliknąć "Wygeneruj quiz z AI" (każde = 100 pytań, kilka wywołań modelu). */
+    public int aiDailyQuizLimit() {
+        return Integer.parseInt(get("ai.daily-quiz-limit", "5"));
+    }
+
+    /** Maksymalny rozmiar puli pytań jednego tematu. */
+    public int quizMaxPool() {
+        return Integer.parseInt(get("ai.quiz-max-pool", "1000"));
+    }
+
+    /** Łączny limit czasu na równoległe porcje jednego generowania quizu. */
+    public int aiQuizTimeoutSeconds() {
+        return Integer.parseInt(get("ai.quiz-timeout-seconds", "240"));
+    }
+
     /** Nazwa dawnego wspólnego konta z wersji bez logowania (wszystkie dane były przypisane do niego). */
     public String legacyDefaultUsername() {
         return get("legacy.default-user.username", "default");

@@ -154,7 +154,7 @@ public final class Schema {
             // Sprzątanie osieroconych notatek po skasowanym temacie (bez FK w starej bazie)
             "DELETE FROM note WHERE topic_id NOT IN (SELECT id FROM topic)",
 
-            // Quiz w tej wersji aplikacji nie istnieje — feature bez UI, bez danych, do wycięcia.
+            // Dawny, nieużywany model quizu (bez UI i danych) — zastąpiony tabelą quiz_question niżej.
             "DROP TABLE IF EXISTS quiz_attempt",
             "DROP TABLE IF EXISTS user_progress",
             "DROP TABLE IF EXISTS quiz",
@@ -194,7 +194,26 @@ public final class Schema {
                 quiz_generations INT NOT NULL DEFAULT 0,
                 UNIQUE (user_id, usage_date)
             )
+            """,
+
+            // Pula pytań quizu z AI (zob. quiz.QuizService) — nowy kształt, celowo pod inną nazwą
+            // niż dawne, usuwane wyżej tabele quiz/quiz_attempt. Odpowiedzi: JSONB z 4 tekstami.
+            // ON DELETE CASCADE: pytania znikają razem z tematem, bez zmian w TopicService.delete().
             """
+            CREATE TABLE IF NOT EXISTS quiz_question (
+                id UUID PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id),
+                topic_id UUID NOT NULL REFERENCES topic(id) ON DELETE CASCADE,
+                difficulty TEXT NOT NULL,
+                question TEXT NOT NULL,
+                code TEXT,
+                options JSONB NOT NULL,
+                correct_index INT NOT NULL CHECK (correct_index BETWEEN 0 AND 3),
+                explanation TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_quiz_question_topic ON quiz_question(topic_id, user_id)"
     );
 
     private Schema() {

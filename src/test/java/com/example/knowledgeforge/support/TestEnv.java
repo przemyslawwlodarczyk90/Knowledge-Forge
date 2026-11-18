@@ -41,6 +41,9 @@ public final class TestEnv {
         v.put("OPENAI_MODEL", "gpt-4o-mini");
         v.put("OPENAI_TEMPERATURE", "0.4");
         v.put("AI_DAILY_NOTE_LIMIT", "3");
+        v.put("AI_DAILY_QUIZ_LIMIT", "2");
+        v.put("AI_QUIZ_MAX_POOL", "250");
+        v.put("AI_QUIZ_TIMEOUT_SECONDS", "20");
         v.put("NOTES_STORAGE_PATH", tempDir.resolve("notes").toString());
         v.put("ATTACHMENTS_STORAGE_PATH", tempDir.resolve("attachments").toString());
         v.put("ATTACHMENTS_MAX_FILE_SIZE_MB", "1");
