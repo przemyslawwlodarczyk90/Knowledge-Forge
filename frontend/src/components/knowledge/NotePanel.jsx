@@ -654,10 +654,12 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
           <h1 className="note-title">{topic.title}</h1>
           {topic.shortPrompt && <p className="note-desc">{topic.shortPrompt}</p>}
           <div className="note-meta-row">
-            <div className="note-author-row" title="Autor będzie uzupełniany automatycznie po zalogowaniu">
-              <span className="note-author-label">Autor</span>
-              <span className="note-author-value">{topic.author || 'automatycznie z konta (wkrótce)'}</span>
-            </div>
+            {topic.author && (
+              <div className="note-author-row">
+                <span className="note-author-label">Autor</span>
+                <span className="note-author-value">{topic.author}</span>
+              </div>
+            )}
             {formatDate(topic.createdAt) && (
               <div className="note-date-row" title="Data utworzenia wpisu — ustawiana raz, przy dodaniu">
                 <span className="note-author-label">Utworzono</span>
