@@ -21,10 +21,10 @@ vi.mock('@/ws/socket', () => ({
 
 const AppLayout = (await import('../components/layout/AppLayout')).default
 
-describe('Rebranding — Knowledge Forge 2.0', () => {
+describe('Rebranding — Knowledge Forge', () => {
   it('index.html tytuł i favicon są zaktualizowane', () => {
     const html = fs.readFileSync(path.resolve(__dirname, '../../index.html'), 'utf8')
-    expect(html).toMatch(/<title>Knowledge Forge 2\.0<\/title>/)
+    expect(html).toContain('<title>Knowledge Forge</title>')
     expect(html).toContain('<link rel="icon" type="image/svg+xml" href="/favicon.svg" />')
     expect(html).not.toMatch(/Knowledge-Forge/)
   })
@@ -35,7 +35,7 @@ describe('Rebranding — Knowledge Forge 2.0', () => {
     expect(svg.length).toBeGreaterThan(50)
   })
 
-  it('sidebar (wordmark) i topbar (chip) pokazują "Knowledge Forge 2.0", nie starą nazwę', () => {
+  it('sidebar (wordmark) i topbar (chip) pokazują "Knowledge Forge", nie starą nazwę', () => {
     render(
       <MemoryRouter initialEntries={['/dashboard']}>
         <Routes>
@@ -45,8 +45,8 @@ describe('Rebranding — Knowledge Forge 2.0', () => {
         </Routes>
       </MemoryRouter>,
     )
-    expect(screen.getByText('Forge 2.0')).toBeInTheDocument()
-    expect(screen.getByText('Knowledge Forge 2.0')).toBeInTheDocument()
+    expect(screen.getByText('Forge')).toBeInTheDocument()
+    expect(screen.getByText('Knowledge Forge')).toBeInTheDocument()
     expect(screen.queryByText('Knowledge-Forge')).not.toBeInTheDocument()
   })
 })

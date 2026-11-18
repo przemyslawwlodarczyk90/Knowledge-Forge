@@ -73,7 +73,7 @@ export function useDebounce(value, delay = 300) {
 export function useTitle(title) {
   useEffect(() => {
     const prev = document.title
-    document.title = title ? `${title} — Knowledge Forge 2.0` : 'Knowledge Forge 2.0'
+    document.title = title ? `${title} — Knowledge Forge` : 'Knowledge Forge'
     return () => { document.title = prev }
   }, [title])
 }

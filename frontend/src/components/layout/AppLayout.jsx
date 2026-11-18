@@ -143,7 +143,7 @@ export default function AppLayout() {
     logout()
     navigate('/login')
   }
-  const pageLabel = PAGE_LABELS[location.pathname] ?? 'Knowledge Forge 2.0'
+  const pageLabel = PAGE_LABELS[location.pathname] ?? 'Knowledge Forge'
 
   // Jedno współdzielone połączenie WebSocket dla całej aplikacji — otwarte raz, gdy layout
   // (czyli cała appka — to jedyny stały korzeń tras) się montuje, zamykane przy odmontowaniu.
@@ -180,7 +180,7 @@ export default function AppLayout() {
               {sidebarOpen && (
                 <div className="sb-wordmark">
                   <span className="sb-wm-a">Knowledge</span>
-                  <span className="sb-wm-b">Forge 2.0</span>
+                  <span className="sb-wm-b">Forge</span>
                 </div>
               )}
             </div>
@@ -262,7 +262,7 @@ export default function AppLayout() {
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{marginRight:4}}>
                   <path d="M1.5 2.5h9M1.5 5.5h6M1.5 8.5h7.5M1.5 11.5h4.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                 </svg>
-                Knowledge Forge 2.0
+                Knowledge Forge
               </span>
             </div>
           </header>

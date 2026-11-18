@@ -47,7 +47,7 @@ const FONT_MONO = 'JetBrainsMono'
 
 // ── Geometria strony (jednostki: pt, 1pt = 1/72 cala; A4 przez jsPDF format:'a4') ──────────
 const MARGIN = { top: 64, bottom: 60, left: 54, right: 54 }
-const FOOTER_TEXT = 'Knowledge Forge 2.0'
+const FOOTER_TEXT = 'Knowledge Forge'
 const MAX_CONCURRENT_REQUESTS = 4
 const MAX_BULK_NOTES = 50
 

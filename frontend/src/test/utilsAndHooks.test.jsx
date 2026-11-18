@@ -50,7 +50,7 @@ describe('hooks', () => {
     vi.useRealTimers()
 
     const { unmount } = renderHook(() => useTitle('Logowanie'))
-    expect(document.title).toBe('Logowanie — Knowledge Forge 2.0')
+    expect(document.title).toBe('Logowanie — Knowledge Forge')
     unmount()
   })
 })
