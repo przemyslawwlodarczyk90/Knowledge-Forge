@@ -6,6 +6,10 @@ import { useAuthStore } from '@/store'
 import { authApi } from '@/api/services'
 
 import '@/styles/globals.css'
+import { applyTheme, readPreference } from '@/theme/theme'
+
+// Zwykle motyw ustawił już skrypt w index.html — to tylko zabezpieczenie, gdyby go zablokowano.
+applyTheme(readPreference())
 
 useAuthStore.getState().rehydrate()
 
