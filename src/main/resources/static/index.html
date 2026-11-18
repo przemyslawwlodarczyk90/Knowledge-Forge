@@ -5,6 +5,16 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Knowledge Forge</title>
+    <meta name="color-scheme" content="light dark" />
+    <!-- Motyw ustawiany przed załadowaniem Reacta — bez mignięcia jasnym tłem (zob. src/theme/theme.js). -->
+    <script>
+      (function () {
+        var pref = 'system';
+        try { pref = localStorage.getItem('kf-theme') || 'system'; } catch (e) {}
+        var dark = pref === 'dark' || (pref !== 'light' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      })();
+    </script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -12,8 +22,8 @@
       href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap"
       rel="stylesheet"
     />
-    <script type="module" crossorigin src="./assets/index-DYPwKAgz.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-BvFh9hEB.css">
+    <script type="module" crossorigin src="./assets/index-CzoDWTWL.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DF3odwb1.css">
   </head>
   <body>
     <div id="root"></div>
