@@ -49,4 +49,22 @@ public class AiUsageGuard {
         }
         return updated.get(0);
     }
+
+    /** Jak {@link #checkAndIncrementNote}, ale dla "Wygeneruj quiz z AI" (osobny licznik quiz_generations). */
+    public int checkAndIncrementQuiz(Long userId) {
+        int limit = config.aiDailyQuizLimit();
+        LocalDate today = LocalDate.now(clock.withZone(ZONE));
+        List<Integer> updated = jdbc.queryForList("""
+                INSERT INTO ai_usage (id, user_id, usage_date, note_generations, quiz_generations)
+                VALUES (?, ?, ?, 0, 1)
+                ON CONFLICT (user_id, usage_date)
+                DO UPDATE SET quiz_generations = ai_usage.quiz_generations + 1
+                WHERE ai_usage.quiz_generations < ?
+                RETURNING quiz_generations
+                """, Integer.class, UUID.randomUUID(), userId, today, limit);
+        if (updated.isEmpty() || updated.get(0) > limit) {
+            throw new DailyLimitExceededException("Daily quiz generation limit reached (" + limit + ")");
+        }
+        return updated.get(0);
+    }
 }
