@@ -8,9 +8,11 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.DynamicUpdate;
 
 /** Konto użytkownika — hasło jako hash BCrypt, rola USER/ADMIN. Dane (kategorie/tematy/notatki) są per-użytkownik. */
 @Entity
+@DynamicUpdate
 @Table(name = "users")
 public class User {
 

@@ -7,6 +7,8 @@ export const authApi = {
   logout:   ()      => api.post('/auth/logout'),
   updateProfile:  (data)  => api.put('/auth/update', data),
   changePassword: (data)  => api.post('/auth/change-password', data),
+  requestPasswordReset: (username) => api.post('/auth/forgot-password', { username }),
+  resetPassword: (token, password) => api.post('/auth/reset-password', { token, password }),
   confirmRegistration: (token) =>
     api.get('/v1/registration/confirm', { params: { token } }),
 }

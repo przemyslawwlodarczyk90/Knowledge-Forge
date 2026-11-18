@@ -113,6 +113,7 @@ export default function LoginPage() {
             </button>
           </div>
           {errors.password?.trim() && <span className="auth-err">{errors.password}</span>}
+          <Link to="/forgot-password" className="auth-link">Nie pamiętasz hasła?</Link>
         </div>
 
         <button type="submit" className="auth-btn" disabled={loading}>

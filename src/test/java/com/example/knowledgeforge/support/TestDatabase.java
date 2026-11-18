@@ -24,7 +24,8 @@ import java.sql.Statement;
  */
 public final class TestDatabase {
 
-    private static final String BASE_URL = "jdbc:postgresql://localhost:5432/pgDB";
+    private static final String BASE_URL = "jdbc:postgresql://localhost:"
+            + Integer.getInteger("kf.test.postgres.port", 5432) + "/pgDB";
     public static final String SCHEMA = "kf_test";
     public static final String URL = BASE_URL + "?currentSchema=" + SCHEMA;
     public static final String USER = "user";

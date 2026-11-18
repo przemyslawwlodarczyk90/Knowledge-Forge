@@ -31,6 +31,32 @@ public class MailService {
     }
 
     @Async
+    public void sendPasswordResetEmail(String to, String link) {
+        if (mailUsername == null || mailUsername.isBlank()) {
+            log.warning("SMTP not configured — password reset email not sent");
+            return;
+        }
+        try {
+            MimeMessage message = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(message, "UTF-8");
+            helper.setFrom(mailUsername);
+            helper.setTo(to);
+            helper.setSubject("Ustaw nowe hasło w Knowledge Forge");
+            helper.setText("""
+                    Otrzymaliśmy prośbę o zresetowanie hasła w Knowledge Forge.
+
+                    Ustaw nowe hasło za pomocą tego jednorazowego linku:
+                    %s
+
+                    Link jest ważny przez 30 minut. Jeśli nie proszono o reset, zignoruj wiadomość.
+                    """.formatted(link));
+            mailSender.send(message);
+        } catch (MessagingException | RuntimeException e) {
+            log.severe("Password reset email failed: " + e.getClass().getSimpleName());
+        }
+    }
+
+    @Async
     public void sendConfirmationEmail(String to, String subject, String username, String confirmationLink) {
         if (mailUsername == null || mailUsername.isBlank()) {
             // Bez skonfigurowanego SMTP (MAIL_USERNAME/MAIL_PASSWORD) nie ma jak wysłać maila — link

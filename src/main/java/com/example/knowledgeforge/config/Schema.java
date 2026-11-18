@@ -40,6 +40,17 @@ public final class Schema {
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'USER'",
 
+            // Jak dla confirmation_tokens, starszy backup może odtwarzać users bez tabeli tokenów.
+            """
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                user_id BIGINT PRIMARY KEY,
+                token_hash VARCHAR(64) NOT NULL UNIQUE,
+                credentials_hash VARCHAR(64) NOT NULL,
+                requested_at TIMESTAMPTZ NOT NULL,
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+            """,
+
             // Tokeny aktywacyjne z maila rejestracyjnego — ten sam kształt, co na masterze.
             """
             CREATE TABLE IF NOT EXISTS confirmation_tokens (

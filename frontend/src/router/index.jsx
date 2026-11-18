@@ -9,6 +9,7 @@ import PageLoader from '@/components/ui/PageLoader'
 const LoginPage    = lazy(() => import('@/pages/auth/LoginPage'))
 const RegisterPage = lazy(() => import('@/pages/auth/RegisterPage'))
 const ConfirmPage  = lazy(() => import('@/pages/auth/ConfirmPage'))
+const PasswordResetPage = lazy(() => import('@/pages/auth/PasswordResetPage'))
 
 // App
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
@@ -44,6 +45,8 @@ export const router = createBrowserRouter([
       { path: '/login',    element: <GuestRoute><S><LoginPage /></S></GuestRoute> },
       { path: '/register', element: <GuestRoute><S><RegisterPage /></S></GuestRoute> },
       { path: '/confirm',  element: <S><ConfirmPage /></S> },
+      { path: '/forgot-password', element: <S><PasswordResetPage key="request" /></S> },
+      { path: '/reset-password', element: <S><PasswordResetPage key="reset" reset /></S> },
     ],
   },
   // ── Chronione (app)
