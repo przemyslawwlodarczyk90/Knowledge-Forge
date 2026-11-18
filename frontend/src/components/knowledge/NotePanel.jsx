@@ -19,6 +19,7 @@ import {
 import ConfirmModal from './modals/ConfirmModal'
 import GenerateNoteModal from './modals/GenerateNoteModal'
 import AttachmentsSection from './AttachmentsSection'
+import QuizBar from './quiz/QuizBar'
 import ResizeHandle from '@/components/layout/ResizeHandle'
 
 const LOG = '[NotePanel]'
@@ -763,6 +764,7 @@ export default function NotePanel({ topic, categoryPath, onTopicUpdated, onOpenT
 
         {/* ── Pasek akcji ── */}
         <div className="note-actions">
+          {note && mode === 'view' && <QuizBar key={topic.id} topicId={topic.id} topic={topic} disabled={noteLoading} />}
           <div className="act-spacer" />
           {mode === 'view' && (
             <button type="button" className="act-btn act-btn--edit" disabled={!editor || noteLoading}
