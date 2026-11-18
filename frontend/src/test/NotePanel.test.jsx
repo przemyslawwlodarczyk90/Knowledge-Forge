@@ -31,12 +31,14 @@ vi.mock('@/ws/clientId', () => ({ getClientId: () => 'this-client' }))
 const getByTopicMock = vi.fn()
 const saveMock = vi.fn()
 const generateMock = vi.fn()
+const refineMock = vi.fn()
 
 vi.mock('@/api/services', () => ({
   notesApi: {
     getByTopic: (...args) => getByTopicMock(...args),
     save: (...args) => saveMock(...args),
     generate: (...args) => generateMock(...args),
+    refine: (...args) => refineMock(...args),
   },
   topicsApi: {
     update: vi.fn(() => Promise.resolve({ data: {} })),
@@ -114,6 +116,7 @@ beforeEach(() => {
   getByTopicMock.mockReset()
   saveMock.mockReset()
   generateMock.mockReset()
+  refineMock.mockReset()
 })
 
 describe('NotePanel — generowanie z AI', () => {
@@ -157,7 +160,7 @@ describe('NotePanel — generowanie z AI', () => {
     getByTopicMock.mockResolvedValue({ data: original })
     const revised = makeNote()
     revised.contentJson.content[0].content[0].text = 'Dopracowana notatka'
-    generateMock.mockResolvedValue({ data: revised })
+    refineMock.mockResolvedValue({ data: revised })
     const user = userEvent.setup()
     const { container } = renderPanel(makeTopic())
     await screen.findByText('Treść notatki')
@@ -174,9 +177,10 @@ describe('NotePanel — generowanie z AI', () => {
     await user.click(submit)
 
     await screen.findByText('Dopracowana notatka')
-    expect(generateMock).toHaveBeenCalledWith('t1', {
-      instruction: 'Dodaj diagram', difficulty: 'MEDIUM', currentNote: 'Treść notatki Dopisek',
+    expect(refineMock).toHaveBeenCalledWith('t1', {
+      instruction: 'Dodaj diagram', currentNote: 'Treść notatki Dopisek',
     }, expect.any(AbortSignal))
+    expect(generateMock).not.toHaveBeenCalled()
     expect(screen.getByRole('img', { name: 'Obraz notatki' })).toBeInTheDocument()
     expect(saveMock).not.toHaveBeenCalled()
   })

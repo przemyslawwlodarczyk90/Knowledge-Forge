@@ -55,6 +55,8 @@ export const notesApi = {
   save:       (topicId, d)      => api.put(`/topics/${topicId}/note`, d),
   generate:   (topicId, data, signal) =>
     api.post(`/topics/${topicId}/note/generate`, data, { signal, timeout: 120_000 }),
+  refine:     (topicId, data, signal) =>
+    api.post(`/topics/${topicId}/note/refine`, data, { signal, timeout: 120_000 }),
 }
 
 // ── Konfiguracja widoczna dla frontendu ──────────────────────────────

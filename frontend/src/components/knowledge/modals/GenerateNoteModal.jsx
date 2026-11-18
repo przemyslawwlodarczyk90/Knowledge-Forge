@@ -36,9 +36,9 @@ export default function GenerateNoteModal({ topic, replacesNote, currentNote, pr
     setLoading(true)
     setError('')
     try {
-      const payload = { instruction: guidance, difficulty }
-      if (refining) payload.currentNote = currentNote
-      const { data } = await notesApi.generate(topic.id, payload, controller.signal)
+      const { data } = refining
+        ? await notesApi.refine(topic.id, { instruction: guidance, currentNote }, controller.signal)
+        : await notesApi.generate(topic.id, { instruction: guidance, difficulty }, controller.signal)
       if (controller.signal.aborted) return
       if (data?.contentJson?.type !== 'doc') throw new Error('Invalid generated document')
       onGenerated(data.contentJson)
