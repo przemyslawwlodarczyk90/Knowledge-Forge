@@ -370,7 +370,7 @@ function RunnerStyles() {
       }
       .qr-result--pass .qr-ring-value { stroke:var(--green); }
       .qr-result--fail .qr-ring-value { stroke:var(--red); }
-      .qr-ring-text { font-size:26px; font-weight:800; fill:var(--text-0); font-family:var(--font-display); }
+      .qr-ring-text { font-size:22px; font-weight:700; fill:var(--text-0); font-family:var(--font-mono); letter-spacing:-.02em; }
       .qr-result-text { display:flex; flex-direction:column; gap:8px; }
       .qr-result-text p { margin:0; color:var(--text-1); }
       .qr-verdict { font-size:1.5rem; font-weight:800; font-family:var(--font-display); }
