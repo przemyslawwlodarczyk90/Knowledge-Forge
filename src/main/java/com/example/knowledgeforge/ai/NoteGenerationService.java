@@ -4,6 +4,7 @@ import com.example.knowledgeforge.ai.dto.GenerateNoteRequest;
 import com.example.knowledgeforge.ai.dto.GeneratedNoteDto;
 import com.example.knowledgeforge.config.AppConfig;
 import com.example.knowledgeforge.domain.exception.TopicNotFoundException;
+import com.example.knowledgeforge.domain.exception.ValidationException;
 import com.example.knowledgeforge.domain.topic.Topic;
 import com.example.knowledgeforge.repository.TopicRepository;
 import com.example.knowledgeforge.service.CurrentUser;
@@ -39,13 +40,20 @@ public class NoteGenerationService {
         Topic topic = topicRepository.findByIdAndUserId(topicId, userId)
                 .orElseThrow(() -> new TopicNotFoundException(topicId.toString()));
 
+        boolean refining = req != null && req.currentNote() != null;
+        if (refining && (req.currentNote().isBlank() || req.instruction() == null || req.instruction().isBlank())) {
+            throw new ValidationException("Do dopracowania podaj treść notatki i opisz, co zmienić.");
+        }
+
         String instruction = req != null && req.instruction() != null && !req.instruction().isBlank()
                 ? req.instruction() : topic.getShortPrompt();
         NoteDifficulty difficulty = req != null && req.difficulty() != null
                 ? req.difficulty() : NoteDifficulty.fromDetailLevel(topic.getDetailLevel());
 
         int usedToday = usageGuard.checkAndIncrementNote(userId);
-        NoteContent content = generationPort.generate(topic.getTitle(), instruction, difficulty);
+        NoteContent content = refining
+                ? generationPort.refine(topic.getTitle(), instruction, difficulty, req.currentNote())
+                : generationPort.generate(topic.getTitle(), instruction, difficulty);
 
         return new GeneratedNoteDto(topicId, content.getTitle(), NoteContentDocumentMapper.toDocument(content),
                 difficulty, generationPort.modelName(), NotePromptBuilder.PROMPT_VERSION, usedToday,

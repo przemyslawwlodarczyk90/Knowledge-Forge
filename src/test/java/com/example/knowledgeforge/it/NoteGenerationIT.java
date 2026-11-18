@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -63,6 +64,26 @@ class NoteGenerationIT extends IntegrationTestBase {
         mvc.perform(as(u, post("/api/topics/" + id + "/note/generate"))).andExpect(status().isOk());
         mvc.perform(as(u, post("/api/topics/" + id + "/note/generate")))
                 .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void refines_the_supplied_draft_without_saving_it() throws Exception {
+        TestUser user = newUser();
+        String id = createTopic(user, createCategory(user, "AI"), "Rekurencja").get("id").asText();
+        String path = "/api/topics/" + id + "/note";
+        String currentNote = "Funkcja wywołuje samą siebie.";
+        String instruction = "Rozwiń warunek stopu i dodaj diagram.";
+        when(port.refine("Rekurencja", instruction, NoteDifficulty.MEDIUM, currentNote)).thenReturn(sample());
+
+        mvc.perform(withJson(as(user, post(path + "/generate")), Map.of("currentNote", currentNote)))
+                .andExpect(status().isBadRequest());
+        mvc.perform(withJson(as(user, post(path + "/generate")),
+                        Map.of("currentNote", currentNote, "instruction", instruction)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contentJson.type").value("doc"))
+                .andExpect(jsonPath("$.usedToday").value(1));
+        verify(port).refine("Rekurencja", instruction, NoteDifficulty.MEDIUM, currentNote);
+        mvc.perform(as(user, get(path))).andExpect(status().isNotFound());
     }
 
     @Test

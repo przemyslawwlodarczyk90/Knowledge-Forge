@@ -3,6 +3,7 @@ package com.example.knowledgeforge.ai;
 import com.example.knowledgeforge.ai.dto.GenerateNoteRequest;
 import com.example.knowledgeforge.ai.dto.GeneratedNoteDto;
 import com.example.knowledgeforge.domain.exception.ValidationException;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -21,7 +22,7 @@ public class NoteGenerationController {
     }
 
     @PostMapping("/api/topics/{id}/note/generate")
-    public GeneratedNoteDto generate(@PathVariable String id, @RequestBody(required = false) GenerateNoteRequest body) {
+    public GeneratedNoteDto generate(@PathVariable String id, @Valid @RequestBody(required = false) GenerateNoteRequest body) {
         UUID topicId;
         try {
             topicId = UUID.fromString(id);

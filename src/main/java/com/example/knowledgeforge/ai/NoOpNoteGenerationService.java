@@ -12,6 +12,11 @@ public class NoOpNoteGenerationService implements NoteGenerationPort {
     }
 
     @Override
+    public NoteContent refine(String topicTitle, String userInstruction, NoteDifficulty difficulty, String currentNote) {
+        return generate(topicTitle, userInstruction, difficulty);
+    }
+
+    @Override
     public String modelName() {
         return "none";
     }
