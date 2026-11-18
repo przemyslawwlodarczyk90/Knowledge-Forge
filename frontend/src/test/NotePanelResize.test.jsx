@@ -13,6 +13,10 @@ vi.mock('@/ws/socket', () => ({
 vi.mock('@/ws/clientId', () => ({ getClientId: () => 'this-client' }))
 
 vi.mock('@/api/services', () => ({
+  quizApi: {
+    stats: vi.fn(() => Promise.resolve({ data: { total: 0, easy: 0, medium: 0, hard: 0, passRatio: 0.75 } })),
+    draw: vi.fn(), generate: vi.fn(), clear: vi.fn(),
+  },
   notesApi: {
     getByTopic: vi.fn(() => Promise.reject({ status: 404 })),
     save: vi.fn(),

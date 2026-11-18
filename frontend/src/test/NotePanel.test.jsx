@@ -34,6 +34,10 @@ const generateMock = vi.fn()
 const refineMock = vi.fn()
 
 vi.mock('@/api/services', () => ({
+  quizApi: {
+    stats: vi.fn(() => Promise.resolve({ data: { total: 0, easy: 0, medium: 0, hard: 0, passRatio: 0.75 } })),
+    draw: vi.fn(), generate: vi.fn(), clear: vi.fn(),
+  },
   notesApi: {
     getByTopic: (...args) => getByTopicMock(...args),
     save: (...args) => saveMock(...args),

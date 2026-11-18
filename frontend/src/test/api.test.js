@@ -48,6 +48,12 @@ describe('api services', () => {
     expect(api.post).toHaveBeenCalledWith('/topics/t/verify-actuality', { expectedVersion: 1 })
     expect(api.get).toHaveBeenCalledWith('/admin/status')
     expect(api.delete).toHaveBeenCalledWith('/attachments/5')
+    const signal = new AbortController().signal
+    s.quizApi.stats('t'); s.quizApi.draw('t', 20); s.quizApi.generate('t', { instruction: 'x' }, signal); s.quizApi.clear('t')
+    expect(api.get).toHaveBeenCalledWith('/topics/t/quiz/stats')
+    expect(api.get).toHaveBeenCalledWith('/topics/t/quiz', { params: { count: 20 } })
+    expect(api.post).toHaveBeenCalledWith('/topics/t/quiz/generate', { instruction: 'x' }, { signal, timeout: 300_000 })
+    expect(api.delete).toHaveBeenCalledWith('/topics/t/quiz')
     vi.doUnmock('@/api/axios')
   })
 })
