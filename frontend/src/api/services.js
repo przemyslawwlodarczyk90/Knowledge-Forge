@@ -59,6 +59,16 @@ export const notesApi = {
     api.post(`/topics/${topicId}/note/refine`, data, { signal, timeout: 120_000 }),
 }
 
+// ── Quiz z AI ─────────────────────────────────────────────────────────
+// Generowanie to 6 równoległych wywołań modelu (100 pytań) — stąd długi timeout.
+export const quizApi = {
+  stats:    (topicId) => api.get(`/topics/${topicId}/quiz/stats`),
+  draw:     (topicId, count) => api.get(`/topics/${topicId}/quiz`, { params: { count } }),
+  generate: (topicId, data, signal) =>
+    api.post(`/topics/${topicId}/quiz/generate`, data, { signal, timeout: 300_000 }),
+  clear:    (topicId) => api.delete(`/topics/${topicId}/quiz`),
+}
+
 // ── Konfiguracja widoczna dla frontendu ──────────────────────────────
 // Wyłącznie przełączniki widoczności elementów UI z config.properties (zob. AppConfigServlet) —
 // NIE sekrety, NIE ścieżki systemowe.
