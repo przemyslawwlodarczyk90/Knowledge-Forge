@@ -4,11 +4,11 @@ import { toast } from '@/store'
 import ConfirmModal from './ConfirmModal'
 
 const DETAIL_LEVEL_OPTS = [
-  { value: 'LOW',    label: 'Niski',   color: '#64748b', bg: '#f1f5f9', border: 'rgba(100,116,139,.25)',
+  { value: 'LOW',    label: 'Niski',   color: '#64748b', bg: 'var(--bg-3)', border: 'rgba(100,116,139,.25)',
     hint: 'Szkic — temat zanotowany, do uzupełnienia później.' },
-  { value: 'MEDIUM', label: 'Średni',  color: '#d97706', bg: '#fffbeb', border: 'rgba(217,119,6,.25)',
+  { value: 'MEDIUM', label: 'Średni',  color: '#d97706', bg: 'var(--yellow-light)', border: 'rgba(217,119,6,.25)',
     hint: 'Notatka robocza — spisana szybko, czytelna głównie dla Ciebie.' },
-  { value: 'HIGH',   label: 'Wysoki',  color: '#16a34a', bg: '#f0fdf4', border: 'rgba(22,163,74,.25)',
+  { value: 'HIGH',   label: 'Wysoki',  color: '#16a34a', bg: 'var(--green-light)', border: 'rgba(22,163,74,.25)',
     hint: 'Notatka dopracowana — napisana tak, by zrozumiał ją każdy.' },
 ]
 
@@ -165,7 +165,7 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
           display:flex; align-items:center; justify-content:center; padding:16px;
         }
         .tm-box {
-          background:#fff; border-radius:var(--radius-xl); border:1px solid var(--border-1);
+          background:var(--bg-1); border-radius:var(--radius-xl); border:1px solid var(--border-1);
           box-shadow:var(--shadow-lg); width:100%; max-width:480px;
           max-height:90vh; overflow-y:auto;
           animation:fadeIn .2s ease both;
@@ -186,7 +186,7 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
           font-size:0.88rem; color:var(--text-0); outline:none;
           transition:border-color .15s; resize:vertical;
         }
-        .mf-input:focus { border-color:var(--accent); background:#fff; box-shadow:0 0 0 3px var(--accent-glow); }
+        .mf-input:focus { border-color:var(--accent); background:var(--bg-1); box-shadow:0 0 0 3px var(--accent-glow); }
         .mf-input--err { border-color:var(--red) !important; }
         .mf-textarea { font-family:inherit; min-height:56px; }
         .mf-error { font-size:0.72rem; color:var(--red); }
@@ -196,7 +196,7 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
         .type-opt {
           flex:1; display:flex; flex-direction:column; gap:2px;
           padding:10px 12px; border-radius:var(--radius-md);
-          border:1.5px solid var(--border-1); background:#fff;
+          border:1.5px solid var(--border-1); background:var(--bg-1);
           cursor:pointer; transition:all var(--t-fast); position:relative;
         }
         .type-opt input { position:absolute; top:10px; right:10px; margin:0; accent-color:var(--accent); }
@@ -209,7 +209,7 @@ export default function CreateTopicModal({ categoryId, categoryName, onClose, on
         .diff-btn {
           flex:1; min-width:80px; padding:8px 6px; text-align:center;
           border-radius:var(--radius-md); border:1.5px solid var(--border-1);
-          background:#fff; font-size:0.79rem; font-weight:600; color:var(--text-2);
+          background:var(--bg-1); font-size:0.79rem; font-weight:600; color:var(--text-2);
           cursor:pointer; transition:all var(--t-fast);
         }
         .diff-btn:hover { border-color:var(--border-0); }

@@ -248,14 +248,14 @@ export default function FiltersPanel() {
           font-size:0.78rem; font-weight:600; cursor:pointer;
           transition:background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
         }
-        .fp-trigger:hover { background:#fff; border-color:var(--border-0); color:var(--accent); }
+        .fp-trigger:hover { background:var(--bg-1); border-color:var(--border-0); color:var(--accent); }
 
         .fp-hint { font-size:0.71rem; color:var(--text-3); line-height:1.4; }
 
         .fp-chip-group { display:flex; gap:5px; flex-wrap:wrap; align-items:center; min-height:40px; }
         .fp-chip {
           padding:7px 11px; border-radius:100px; border:1.5px solid var(--border-1);
-          background:#fff; font-size:0.76rem; font-weight:600; color:var(--text-2);
+          background:var(--bg-1); font-size:0.76rem; font-weight:600; color:var(--text-2);
           cursor:pointer; transition:all var(--t-fast); white-space:nowrap;
         }
         .fp-chip:hover { border-color:var(--border-0); }
@@ -266,7 +266,7 @@ export default function FiltersPanel() {
           padding:12px 14px; background:var(--bg-2); border:1px solid var(--border-1); border-radius:var(--radius-md);
           text-align:left; cursor:pointer; transition:background var(--t-fast), border-color var(--t-fast);
         }
-        .fp-result:hover { background:#fff; border-color:var(--border-0); }
+        .fp-result:hover { background:var(--bg-1); border-color:var(--border-0); }
         .fp-result-top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
         .fp-result-title { font-size:0.87rem; font-weight:700; color:var(--text-0); }
         .fp-result-level {
@@ -277,7 +277,7 @@ export default function FiltersPanel() {
         .fp-result-badge {
           font-family:var(--font-mono); font-size:0.61rem; font-weight:700;
           letter-spacing:0.05em; text-transform:uppercase;
-          padding:2px 7px; border-radius:100px; background:#fff; border:1px solid var(--border-1); color:var(--text-2);
+          padding:2px 7px; border-radius:100px; background:var(--bg-1); border:1px solid var(--border-1); color:var(--text-2);
         }
         .fp-result-path { color:var(--text-3); }
       `}</style>

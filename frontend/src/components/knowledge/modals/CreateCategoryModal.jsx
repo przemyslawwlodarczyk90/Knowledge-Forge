@@ -74,7 +74,7 @@ function ModalStyles() {
         display:flex; align-items:center; justify-content:center; padding:16px;
       }
       .modal-box {
-        background:#fff; border-radius:var(--radius-xl);
+        background:var(--bg-1); border-radius:var(--radius-xl);
         border:1px solid var(--border-1);
         box-shadow:var(--shadow-lg);
         width:100%; max-width:420px;
@@ -101,7 +101,7 @@ function ModalStyles() {
         font-size:0.88rem; color:var(--text-0); outline:none;
         transition:border-color .15s;
       }
-      .mf-input:focus { border-color:var(--accent); background:#fff; box-shadow:0 0 0 3px var(--accent-glow); }
+      .mf-input:focus { border-color:var(--accent); background:var(--bg-1); box-shadow:0 0 0 3px var(--accent-glow); }
       .mf-error { font-size:0.72rem; color:var(--red); }
       .btn-primary {
         padding:9px 20px; background:var(--accent); color:#fff;

@@ -337,7 +337,7 @@ export default function AttachmentsSection({ topicId }) {
         .att-desc-input {
           flex: 1 1 200px; min-width: 0; padding: 7px 10px;
           border: 1.5px solid var(--border-1); border-radius: var(--radius-md);
-          background: #fff; font-size: 0.78rem; color: var(--text-0); outline: none;
+          background: var(--bg-1); font-size: 0.78rem; color: var(--text-0); outline: none;
           transition: border-color var(--t-fast);
         }
         .att-desc-input:focus { border-color: var(--accent); }
@@ -368,7 +368,7 @@ export default function AttachmentsSection({ topicId }) {
 
         .att-row {
           display: flex; align-items: flex-start; gap: 10px;
-          padding: 9px 10px; background: #fff; border: 1px solid var(--border-1);
+          padding: 9px 10px; background: var(--bg-1); border: 1px solid var(--border-1);
           border-radius: var(--radius-md); min-width: 0;
         }
         .att-row-icon { color: var(--text-3); flex-shrink: 0; margin-top: 1px; }
@@ -392,7 +392,7 @@ export default function AttachmentsSection({ topicId }) {
         .att-row-actions { display: flex; gap: 4px; flex-shrink: 0; }
         .att-row-btn {
           width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
-          border-radius: 6px; border: 1px solid var(--border-1); background: #fff;
+          border-radius: 6px; border: 1px solid var(--border-1); background: var(--bg-1);
           color: var(--text-2); cursor: pointer; text-decoration: none;
           transition: background var(--t-fast), color var(--t-fast);
         }

@@ -42,7 +42,7 @@ export default function BulkPdfIssuesModal({ failed, okCount, onCancel, onContin
           display: flex; align-items: center; justify-content: center; padding: 16px;
         }
         .bpi-box {
-          background: #fff; border-radius: var(--radius-xl); border: 1px solid var(--border-1);
+          background: var(--bg-1); border-radius: var(--radius-xl); border: 1px solid var(--border-1);
           box-shadow: var(--shadow-lg); width: 100%; max-width: 440px;
           padding: 22px 22px 18px; animation: fadeIn .2s ease both;
         }

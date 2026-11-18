@@ -3,7 +3,7 @@ export function AuthStyles() {
     <style>{`
       /* ── Card ── */
       .auth-card {
-        background: #ffffff;
+        background: var(--bg-1);
         border: 1px solid var(--border-1);
         border-radius: var(--radius-xl);
         padding: 2.4rem 2.4rem 2rem;
@@ -60,11 +60,11 @@ export function AuthStyles() {
       .auth-input::placeholder { color: var(--text-3); }
       .auth-input:hover:not(:focus) {
         border-color: rgba(37,99,235,0.3);
-        background: #ffffff;
+        background: var(--bg-1);
       }
       .auth-input:focus {
         border-color: var(--accent);
-        background: #ffffff;
+        background: var(--bg-1);
         box-shadow: 0 0 0 3px var(--accent-glow);
       }
       .auth-input--padded { padding-right: 44px; }

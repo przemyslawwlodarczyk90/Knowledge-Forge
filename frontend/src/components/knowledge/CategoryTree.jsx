@@ -337,7 +337,7 @@ export default function CategoryTree({
           display: flex; align-items: center; justify-content: space-between;
           padding: 13px 14px 10px;
           border-bottom: 1px solid var(--border-1);
-          background: #fff;
+          background: var(--bg-1);
           flex-shrink: 0;
         }
         .tree-head-title {
@@ -358,7 +358,7 @@ export default function CategoryTree({
           display: flex; align-items: center; gap: 6px;
           padding: 8px 14px;
           border-bottom: 1px solid var(--border-1);
-          background: #fff; flex-shrink: 0;
+          background: var(--bg-1); flex-shrink: 0;
           font-size: 0.74rem; font-weight: 700; color: var(--text-1);
           cursor: pointer; user-select: none;
         }
@@ -375,7 +375,7 @@ export default function CategoryTree({
         .tree-bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; }
         .tree-bulk-btn {
           padding: 5px 10px; border-radius: var(--radius-md);
-          border: 1px solid var(--border-0); background: #fff;
+          border: 1px solid var(--border-0); background: var(--bg-1);
           font-size: 0.71rem; font-weight: 700; color: var(--text-2);
           cursor: pointer; transition: all var(--t-fast);
           display: inline-flex; align-items: center; gap: 4px;
@@ -391,7 +391,7 @@ export default function CategoryTree({
           display: flex; align-items: center; gap: 4px;
           padding: 6px 14px 8px;
           border-bottom: 1px solid var(--border-1);
-          background: #fff;
+          background: var(--bg-1);
           flex-shrink: 0;
         }
         .tree-legend-item {
@@ -408,7 +408,7 @@ export default function CategoryTree({
           display: flex; align-items: center; gap: 6px;
           padding: 7px 14px;
           border-bottom: 1px solid var(--border-1);
-          background: #fff; flex-shrink: 0;
+          background: var(--bg-1); flex-shrink: 0;
           font-size: 0.71rem; font-weight: 600; color: var(--text-2);
           cursor: pointer; user-select: none;
         }
@@ -432,7 +432,7 @@ export default function CategoryTree({
           padding-right: 8px;
           position: relative;
         }
-        .tn-row:hover { background: rgba(0,0,0,0.03); }
+        .tn-row:hover { background: var(--hover); }
 
         /* Depth 0 — Kategoria główna */
         .tn-row--d0 {
@@ -502,10 +502,10 @@ export default function CategoryTree({
         }
         .tn-act--sub:hover { background: var(--accent-glow-strong); }
         .tn-act--topic {
-          background: #f0fdf4; color: #16a34a;
+          background: var(--green-light); color: var(--green);
           border-color: rgba(22,163,74,.25);
         }
-        .tn-act--topic:hover { background: #dcfce7; }
+        .tn-act--topic:hover { background: var(--green-soft); }
 
         /* Dzieci */
         .tn-children { }
@@ -547,7 +547,7 @@ export default function CategoryTree({
         .tn-topic-desc { font-style: italic; color: var(--text-3); font-size: 0.92em; }
         .tn-topic--low .tn-topic-name { color: var(--text-2); font-style: italic; }
         .tn-topic-low-flag {
-          display: inline-block; color: #b45309; font-weight: 800;
+          display: inline-block; color: var(--yellow-strong); font-weight: 800;
           font-style: normal; margin-right: 3px;
         }
         .tn-topic-diff {

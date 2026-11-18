@@ -231,14 +231,14 @@ export default function ActualityReviewPanel() {
           font-size:0.78rem; font-weight:600; cursor:pointer;
           transition:background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
         }
-        .arp-trigger:hover { background:#fff; border-color:var(--border-0); color:var(--accent); }
+        .arp-trigger:hover { background:var(--bg-1); border-color:var(--border-0); color:var(--accent); }
 
         .arp-row {
           display:flex; flex-direction:column; gap:6px;
           padding:14px 16px; background:var(--bg-2); border:1px solid var(--border-1); border-radius:var(--radius-md);
           transition:border-color var(--t-fast), background var(--t-fast);
         }
-        .arp-row:hover { background:#fff; border-color:var(--border-0); }
+        .arp-row:hover { background:var(--bg-1); border-color:var(--border-0); }
         .arp-row-top { display:flex; align-items:center; gap:8px; }
         .arp-row-title { font-size:0.9rem; font-weight:700; color:var(--text-0); flex:1; min-width:0; }
         .arp-row-badge {
@@ -247,7 +247,7 @@ export default function ActualityReviewPanel() {
           padding:2px 8px; border-radius:100px;
           background:var(--accent-light); border:1px solid var(--border-0); color:var(--accent);
         }
-        .arp-row-badge[data-type="INSTRUCTION"] { background:#f5f3ff; border-color:rgba(124,58,237,.25); color:#7c3aed; }
+        .arp-row-badge[data-type="INSTRUCTION"] { background:var(--violet-light); border-color:var(--violet-border); color:var(--violet); }
         .arp-row-path { font-size:0.72rem; color:var(--text-3); }
         .arp-row-dates { display:flex; flex-direction:column; gap:3px; font-size:0.74rem; color:var(--text-2); margin-top:2px; }
         .arp-row-dates b { color:var(--text-1); font-weight:600; }
@@ -258,8 +258,8 @@ export default function ActualityReviewPanel() {
           flex:1; height:36px; border-radius:var(--radius-md); font-size:0.78rem; font-weight:700;
           cursor:pointer; white-space:nowrap; transition:all var(--t-fast); border:1.5px solid transparent;
         }
-        .arp-btn--confirm { background:#f0fdf4; color:#16a34a; border-color:rgba(22,163,74,.3); }
-        .arp-btn--confirm:hover { background:#dcfce7; }
+        .arp-btn--confirm { background:var(--green-light); color:var(--green); border-color:rgba(22,163,74,.3); }
+        .arp-btn--confirm:hover { background:var(--green-soft); }
         .arp-btn--edit { background:var(--accent-light); color:var(--accent); border-color:var(--border-0); }
         .arp-btn--edit:hover { background:var(--accent-glow-strong); }
       `}</style>

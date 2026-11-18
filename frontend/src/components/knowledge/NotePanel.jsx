@@ -41,11 +41,11 @@ const NOTE_LOWER_OVERLAP_SLIVER_MIN = 24 // techniczne minimum widocznego skrawk
 const NOTE_UPPER_STACK_ESTIMATE = 176 + 9 + 96 // rozsądne przybliżenie przed pierwszym pomiarem ResizeObserver (nagłówek + uchwyt + poziom szczegółowości)
 
 const DETAIL_LEVEL_OPTS = [
-  { value: 'LOW',    label: 'Niski',  color: '#64748b', bg: '#f1f5f9', border: 'rgba(100,116,139,.25)',
+  { value: 'LOW',    label: 'Niski',  color: '#64748b', bg: 'var(--bg-3)', border: 'rgba(100,116,139,.25)',
     hint: 'Szkic — zanotowany, do uzupełnienia później.' },
-  { value: 'MEDIUM', label: 'Średni', color: '#d97706', bg: '#fffbeb', border: 'rgba(217,119,6,.25)',
+  { value: 'MEDIUM', label: 'Średni', color: '#d97706', bg: 'var(--yellow-light)', border: 'rgba(217,119,6,.25)',
     hint: 'Notatka robocza — spisana szybko, czytelna głównie dla Ciebie.' },
-  { value: 'HIGH',   label: 'Wysoki', color: '#16a34a', bg: '#f0fdf4', border: 'rgba(22,163,74,.25)',
+  { value: 'HIGH',   label: 'Wysoki', color: '#16a34a', bg: 'var(--green-light)', border: 'rgba(22,163,74,.25)',
     hint: 'Notatka dopracowana — napisana tak, by zrozumiał ją każdy.' },
 ]
 
@@ -873,7 +873,7 @@ function NoteStyles() {
         display:none;
         position:absolute; top:16px; left:16px;
         align-items:center; gap:6px;
-        padding:7px 12px; background:#fff;
+        padding:7px 12px; background:var(--bg-1);
         border:1px solid var(--border-1); border-radius:var(--radius-md);
         font-size:0.78rem; font-weight:600; color:var(--text-1);
         cursor:pointer; box-shadow:var(--shadow-sm);
@@ -883,7 +883,7 @@ function NoteStyles() {
       .np-tree-toggle--inline { position:static; flex-shrink:0; }
 
       /* ── Panel ── */
-      .note-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; background:#fff; min-width:0; position:relative; }
+      .note-panel { flex:1; display:flex; flex-direction:column; overflow:hidden; background:var(--bg-1); min-width:0; position:relative; }
 
       /* Górny stos — nagłówek + jego uchwyt + baner konfliktu + poziom szczegółowości, w
          normalnym układzie, mierzony na żywo (ResizeObserver, zob. upperStackRef). To NAD nim
@@ -904,7 +904,7 @@ function NoteStyles() {
         padding:3px 8px; border-radius:100px;
         background:var(--accent-light); border:1px solid var(--border-0); color:var(--accent);
       }
-      .note-type-badge[data-type="INSTRUCTION"] { background:#f5f3ff; border-color:rgba(124,58,237,.25); color:#7c3aed; }
+      .note-type-badge[data-type="INSTRUCTION"] { background:var(--violet-light); border-color:var(--violet-border); color:var(--violet); }
       .note-title { font-size:1.3rem; font-weight:800; color:var(--text-0); line-height:1.25; letter-spacing:-0.01em; margin-bottom:4px; }
       .note-desc { font-size:0.78rem; color:var(--text-3); font-style:italic; line-height:1.5; margin-bottom:8px; }
       .note-meta-row { display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
@@ -915,11 +915,11 @@ function NoteStyles() {
       /* Konflikt wersji — optimistic locking (409) */
       .note-conflict {
         display:flex; align-items:flex-start; gap:10px;
-        padding:11px 24px; background:#fffbeb; border-bottom:1px solid rgba(217,119,6,.25);
+        padding:11px 24px; background:var(--yellow-light); border-bottom:1px solid rgba(217,119,6,.25);
         flex-shrink:0;
       }
-      .note-conflict-icon { font-size:0.95rem; color:#d97706; flex-shrink:0; line-height:1.4; }
-      .note-conflict-text { flex:1; font-size:0.79rem; color:#92400e; line-height:1.5; }
+      .note-conflict-icon { font-size:0.95rem; color:var(--yellow); flex-shrink:0; line-height:1.4; }
+      .note-conflict-text { flex:1; font-size:0.79rem; color:var(--yellow-strong); line-height:1.5; }
       .note-conflict-btn {
         flex-shrink:0; padding:6px 12px; background:#d97706; color:#fff; border:none;
         border-radius:var(--radius-md); font-size:0.76rem; font-weight:700; cursor:pointer;
@@ -927,7 +927,7 @@ function NoteStyles() {
       }
       .note-conflict-btn:hover { background:#b45309; }
       .note-conflict-dismiss {
-        flex-shrink:0; background:none; border:none; color:#92400e; cursor:pointer;
+        flex-shrink:0; background:none; border:none; color:var(--yellow-strong); cursor:pointer;
         font-size:0.8rem; padding:4px 6px; border-radius:6px; opacity:.7;
       }
       .note-conflict-dismiss:hover { opacity:1; background:rgba(217,119,6,.12); }
@@ -944,7 +944,7 @@ function NoteStyles() {
       .diff-group { display:flex; gap:5px; flex-wrap:wrap; }
       .diff-btn {
         padding:5px 12px; border-radius:var(--radius-md);
-        border:1.5px solid var(--border-1); background:#fff;
+        border:1.5px solid var(--border-1); background:var(--bg-1);
         font-size:0.77rem; font-weight:600; color:var(--text-2);
         cursor:pointer; transition:all var(--t-fast); display:flex; align-items:center; gap:4px;
       }
@@ -958,7 +958,7 @@ function NoteStyles() {
       .editor-toolbar {
         display:flex; align-items:center; gap:3px; flex-wrap:wrap;
         padding:8px 24px; border-bottom:1px solid var(--border-1);
-        background:#fff; flex-shrink:0; position:relative; z-index:2;
+        background:var(--bg-1); flex-shrink:0; position:relative; z-index:2;
       }
       .tb-btn {
         min-width:28px; height:28px; padding:0 7px; border-radius:6px;
@@ -990,7 +990,7 @@ function NoteStyles() {
         position: absolute; left: 0; right: 0; bottom: 0;
         top: var(--note-lower-top, 0px);
         z-index: 20;
-        background: #fff;
+        background: var(--bg-1);
         display: flex; flex-direction: column; overflow: hidden;
       }
 
@@ -1056,7 +1056,7 @@ function NoteStyles() {
       /* Actions */
       .note-actions {
         padding:10px 16px; border-top:1px solid var(--border-1); flex-shrink:0;
-        display:flex; align-items:center; gap:6px; background:#fff;
+        display:flex; align-items:center; gap:6px; background:var(--bg-1);
         flex-wrap:wrap;
       }
       .act-spacer { flex:1; }
@@ -1064,12 +1064,12 @@ function NoteStyles() {
         display:inline-flex; align-items:center; gap:6px;
         padding:8px 14px; border-radius:var(--radius-md); border:1.5px solid var(--border-1);
         font-size:0.78rem; font-weight:600; cursor:pointer;
-        transition:all var(--t-fast); white-space:nowrap; background:#fff;
+        transition:all var(--t-fast); white-space:nowrap; background:var(--bg-1);
         text-decoration:none;
       }
       .act-btn:disabled { opacity:.45; cursor:not-allowed; }
-      .act-btn--pdf { background:#fef2f2; color:#dc2626; border-color:rgba(220,38,38,.25); }
-      .act-btn--pdf:hover { background:#fee2e2; }
+      .act-btn--pdf { background:var(--red-light); color:var(--red); border-color:rgba(220,38,38,.25); }
+      .act-btn--pdf:hover { background:var(--red-soft); }
       .act-btn--edit { background:var(--accent-light); color:var(--accent); border-color:var(--border-0); }
       .act-btn--edit:hover { background:var(--accent-glow-strong); }
       .act-btn--cancel { color:var(--text-2); }

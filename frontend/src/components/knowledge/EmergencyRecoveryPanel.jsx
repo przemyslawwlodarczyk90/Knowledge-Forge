@@ -304,12 +304,12 @@ export default function EmergencyRecoveryPanel() {
 
             .erp-summary { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
             .erp-summary p { font-size: 0.86rem; color: var(--text-1); line-height: 1.6; }
-            .erp-issue-count { color: #d97706; font-weight: 700; }
+            .erp-issue-count { color: var(--yellow); font-weight: 700; }
 
-            .erp-issues { background: #fffbeb; border: 1px solid rgba(217,119,6,.25); border-radius: var(--radius-md); padding: 14px 16px; }
-            .erp-issues-title { font-weight: 700; color: #92400e; margin-bottom: 6px; }
-            .erp-issues-list { margin: 0 0 8px; padding-left: 18px; font-size: 0.8rem; color: #92400e; line-height: 1.7; max-height: 220px; overflow-y: auto; }
-            .erp-issues-note { font-size: 0.76rem; color: #92400e; opacity: .85; }
+            .erp-issues { background: var(--yellow-light); border: 1px solid rgba(217,119,6,.25); border-radius: var(--radius-md); padding: 14px 16px; }
+            .erp-issues-title { font-weight: 700; color: var(--yellow-strong); margin-bottom: 6px; }
+            .erp-issues-list { margin: 0 0 8px; padding-left: 18px; font-size: 0.8rem; color: var(--yellow-strong); line-height: 1.7; max-height: 220px; overflow-y: auto; }
+            .erp-issues-note { font-size: 0.76rem; color: var(--yellow-strong); opacity: .85; }
 
             .erp-actions-row { display: flex; gap: 10px; }
             .erp-download-link { text-decoration: none; text-align: center; }
@@ -326,7 +326,7 @@ export default function EmergencyRecoveryPanel() {
           font-size:0.78rem; font-weight:600; cursor:pointer;
           transition:background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
         }
-        .erp-trigger:hover { background:#fff; border-color:var(--border-0); color:var(--accent); }
+        .erp-trigger:hover { background:var(--bg-1); border-color:var(--border-0); color:var(--accent); }
       `}</style>
     </>
   )

@@ -29,7 +29,7 @@ export default function ConfirmModal({ title, message, confirmLabel = 'Potwierd≈
           display:flex; align-items:center; justify-content:center; padding:16px;
         }
         .cfm-box {
-          background:#fff; border-radius:var(--radius-xl); border:1px solid var(--border-1);
+          background:var(--bg-1); border-radius:var(--radius-xl); border:1px solid var(--border-1);
           box-shadow:var(--shadow-lg); width:100%; max-width:380px;
           padding:22px 22px 18px; animation:fadeIn .2s ease both;
         }

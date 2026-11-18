@@ -113,7 +113,7 @@ export default function SlideOverPanel({ title, onClose, children }) {
 
         .sop-panel {
           width:100%; max-width:100vw; height:100%;
-          background:#fff;
+          background:var(--bg-1);
           box-shadow:-20px 0 44px rgba(15,23,42,0.16), -3px 0 10px rgba(15,23,42,0.07);
           display:flex; flex-direction:column; overflow:hidden;
           transform:translateX(100%);
@@ -129,7 +129,7 @@ export default function SlideOverPanel({ title, onClose, children }) {
         .sop-title { font-size:1.16rem; font-weight:800; color:var(--text-0); letter-spacing:-0.01em; }
         .sop-close {
           flex-shrink:0; width:36px; height:36px; display:flex; align-items:center; justify-content:center;
-          background:#fff; border:1.5px solid var(--border-1); border-radius:50%; color:var(--text-2); cursor:pointer;
+          background:var(--bg-1); border:1.5px solid var(--border-1); border-radius:50%; color:var(--text-2); cursor:pointer;
           transition:background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
         }
         .sop-close:hover { background:var(--red-light); border-color:rgba(220,38,38,0.28); color:var(--red); }
@@ -147,7 +147,7 @@ export default function SlideOverPanel({ title, onClose, children }) {
           font-size:0.85rem; color:var(--text-0); outline:none; min-width:0;
           transition:border-color var(--t-fast), box-shadow var(--t-fast), background var(--t-fast);
         }
-        .sop-input:focus, .sop-select:focus { border-color:var(--accent); background:#fff; box-shadow:0 0 0 3px var(--accent-glow); }
+        .sop-input:focus, .sop-select:focus { border-color:var(--accent); background:var(--bg-1); box-shadow:0 0 0 3px var(--accent-glow); }
         .sop-select:disabled { opacity:.55; cursor:not-allowed; }
 
         .sop-actions { display:flex; gap:10px; justify-content:flex-end; }
@@ -161,7 +161,7 @@ export default function SlideOverPanel({ title, onClose, children }) {
         .sop-btn-primary:hover:not(:disabled) { background:var(--accent-dim); }
         .sop-btn-primary:disabled { opacity:.6; cursor:not-allowed; box-shadow:none; }
         .sop-btn-secondary { background:var(--bg-2); color:var(--text-2); border-color:var(--border-1); }
-        .sop-btn-secondary:hover:not(:disabled) { background:#fff; border-color:var(--border-0); color:var(--text-1); }
+        .sop-btn-secondary:hover:not(:disabled) { background:var(--bg-1); border-color:var(--border-0); color:var(--text-1); }
         .sop-btn-secondary:disabled { opacity:.55; cursor:not-allowed; }
         .sop-spin { width:14px; height:14px; border:2px solid rgba(255,255,255,.4); border-top-color:#fff; border-radius:50%; animation:sopSpin .65s linear infinite; flex-shrink:0; }
         @keyframes sopSpin { to { transform:rotate(360deg); } }
@@ -180,7 +180,7 @@ export default function SlideOverPanel({ title, onClose, children }) {
         .sop-empty-title { font-size:0.94rem; font-weight:700; color:var(--text-0); }
         .sop-empty-text { font-size:0.8rem; color:var(--text-3); line-height:1.55; }
         .sop-empty-retry {
-          margin-top:6px; height:36px; padding:0 16px; background:#fff; border:1.5px solid var(--border-1);
+          margin-top:6px; height:36px; padding:0 16px; background:var(--bg-1); border:1.5px solid var(--border-1);
           border-radius:var(--radius-md); font-size:0.78rem; font-weight:700; color:var(--text-1); cursor:pointer;
           transition:background var(--t-fast), border-color var(--t-fast);
         }
