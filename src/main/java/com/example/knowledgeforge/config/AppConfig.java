@@ -132,6 +132,11 @@ public class AppConfig {
         return Integer.parseInt(get("ai.quiz-max-pool", "1000"));
     }
 
+    /** Limit czasu odczytu odpowiedzi pojedynczego wywołania OpenAI. */
+    public int aiReadTimeoutSeconds() {
+        return Integer.parseInt(get("ai.read-timeout-seconds", "120"));
+    }
+
     /** Łączny limit czasu na równoległe porcje jednego generowania quizu. */
     public int aiQuizTimeoutSeconds() {
         return Integer.parseInt(get("ai.quiz-timeout-seconds", "240"));
